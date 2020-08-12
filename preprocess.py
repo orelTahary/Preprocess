@@ -10,8 +10,9 @@ import pandas as pd
 import logging
 import sys
 from datetime import datetime
+import scipy.io as sio
 
-__version__ = '0.0.1'
+__version__ = '0.0.5'
 
 # def logging_test():
 #     logging.debug('bli')
@@ -37,6 +38,29 @@ def plotWireless(fileName, plotLimit, channels, samplingRate=32000, nChannels=32
     axes.legend(loc='upper left')
     return fig, axes
 
+
+def plotAO(fileDir, filePrefix, fileList, plotLimit, channels, samplingRate=44000, nChannels=32, ):
+    logging.info('started plotAO function')
+    if type(channels) is not list:
+        channels = [channels]
+        logging.debug('input was not in the format of a list, corrected')
+    fig, axes = plt.subplots()
+    plotRange = range(plotLimit[0] * samplingRate, plotLimit[1] * samplingRate)
+    xRange: List[float] = [x/samplingRate for x in plotRange]
+    for elecNum in channels:
+        logging.info(f'Processing electrode {elecNum}')
+        elecName = f'CRAW_{elecNum:03d}'
+        elecData = [None] * len(fileList)
+        for i, fileNum in enumerate(fileList):
+            fileName = f'{fileDir}{filePrefix}{fileNum:04d}.mat'
+            matList=sio.loadmat(fileName, variable_names=elecName)
+            elecData[i] = matList[elecName][0,:]
+        allData = np.concatenate(elecData)
+        axes.plot(xRange, allData[plotRange], label=f'Elec {elecNum}')
+    axes.set_xlabel(f'Time (s)')
+    axes.set_title(f'AO files in {fileDir}, channels: {channels}')
+    axes.legend(loc='upper left')
+    return fig, axes
 #
 # Transform wireless files to concatenated binary, single electrode, files
 #
@@ -50,6 +74,8 @@ def wirelessToBin(inDir, outDir, files, elecList, nChannels=32, verbose=False):
     # Read each wireless file and separate to electrodes
     for file in files:
         fileName = "{0}NEUR{1}{2}.DT2".format(inDir, '0'*(4-len(str(file))), file)
+        if not os.path.isfile(fileName):
+            fileName = "{0}BACK{1}{2}.DT2".format(inDir, '0'*(4-len(str(file))), file)
         if verbose:
             print(f'Transforming {fileName} to binary')
         fid = open(fileName, 'rb')
@@ -66,13 +92,54 @@ def wirelessToBin(inDir, outDir, files, elecList, nChannels=32, verbose=False):
     closeFids(ofids, elecList)
     return nSamples
 
+
+def AOtoBin(fileDir, filePrefix, fileList, elecList, saveLfp=True, saveRaw=True, saveFilter=True, sampRate=44000, lfpBand = [2,300], filterBand=[300, 6000]):
+    bPass, aPass = sig.butter(4, [300/(sampRate/2),6000/(sampRate/2)], btype='bandpass')
+    # [bf, af] = sig.butter(4, [f/(1000/2) for f in freq], btype='band')
+    bNotch, aNotch = sig.iirnotch(50/(1000/2), 30)
+    for elecNum in elecList:
+        elecName = f'CRAW_{elecNum:03d}'
+        logging.info(f'Processing electrode: {elecName}')
+        if saveRaw:
+            if not os.path.exists(os.path.join(fileDir,'Raw')):
+                os.mkdir(os.path.join(fileDir,'Raw'))
+            rawDir = os.path.join(fileDir,'Raw',"")
+            outRawFileName = f'{rawDir}{filePrefix}Raw{elecNum:03d}-{fileList[0]}-{fileList[-1]}.bin' 
+        if saveFilter:
+            if not os.path.exists(os.path.join(fileDir,'Filter')):
+                os.mkdir(os.path.join(fileDir,'Filter'))
+            fiterDir = os.path.join(fileDir,'Filter','')
+            outFilterFileName = f'{fiterDir}{filePrefix}Filter{elecNum:03d}-{fileList[0]}-{fileList[-1]}.bin' 
+        if saveLfp:
+            if not os.path.exists(os.path.join(fileDir,'Lfp')):
+                os.mkdir(os.path.join(fileDir,'Lfp'))
+            lfpDir = os.path.join(fileDir,'Lfp','')
+            outLfpFileName = f'{lfpDir}{filePrefix}Lfp{elecNum:03d}-{fileList[0]}-{fileList[-1]}.bin' 
+        elecData = [None] * len(fileList)
+        for i, fileNum in enumerate(fileList):
+            fileName = f'{fileDir}{filePrefix}{fileNum:04d}.mat'
+            logging.info(f'Processing electrode: {fileName}')
+            matList=sio.loadmat(fileName, variable_names=elecName)
+            elecData[i] = matList[elecName][0,:]
+        allData = np.concatenate(elecData)
+        allData = allData.astype(np.int16)
+        if saveRaw:
+            allData.tofile(outRawFileName)
+        if saveFilter:
+            filtData = sig.filtfilt(bPass, aPass, allData)
+            filtData.astype(np.int16).tofile(outFilterFileName)
+        if saveLfp:
+            lfpData = sig.decimate(allData, int(sampRate/1000), ftype='fir')
+            lfpData = sig.filtfilt(bNotch, aNotch, lfpData)
+            lfpData.astype(np.int16).tofile(outLfpFileName)
 #
 # Plot activity of electrode in a bin file
 #
-def plotBin(fileName, plotLimit, samplingRate=32000):
+def plotBin(fileName, plotLimit, samplingRate=32000, axes=None):
     logging.info("started plotBin function")
-    fig, axes = plt.subplots()
-    plotRange = range(int(plotLimit[0] * samplingRate), int(plotLimit[1] * samplingRate))
+    if not axes:
+        fig, axes = plt.subplots()
+    plotRange = range(int(plotLimit[0] * samplingRate), (int(plotLimit[1] * samplingRate) - 1 ))
     xRange = [x/samplingRate for x in plotRange]
     try:
         with open(fileName, 'rb') as fid:
@@ -82,7 +149,9 @@ def plotBin(fileName, plotLimit, samplingRate=32000):
             axes.set_title(f'File {fileName}')
     except IOError:
         logging.warning(f'Unable to open file: {fileName}')
-    return fig, axes
+    if 'fig' in locals():
+        return fig, axes
+    return axes
 #
 # Iterate over binary files and remove the median
 #
@@ -257,7 +326,76 @@ def bandpass_filter(inDir, outDir, filePattern, elecList, freq=[300, 6000], notc
         sdata.tofile(ofid)
         if verbose:
             print(f'Tranform binary file {inFileName} to LFP file {outFileName}')
+
+
+def plot_corr_mat(dataDir, rangeStr, file_list, raw_fold='binNew', filt_fold='binBand', draw_lfp=False):
     
+    rawRange = [os.path.join(dataDir, raw_fold, f"Elec{i}{rangeStr}.bin") for i in file_list]
+    offset = 32000 * 90
+    count = 32000 * 240
+    samplingRate = 32000
+
+    elec_array = np.zeros((len(file_list), count))
+    for i, f in enumerate(rawRange):
+        elec_array[i,:] = np.fromfile(f, dtype=np.int16, count=count)
+    
+    
+    
+    # print(os.path.isdir(os.path.join(dataDir, filt_fold)))
+    if not os.path.isdir(os.path.join(dataDir, filt_fold)):
+        bb,ab = sig.butter(4, [300/(samplingRate/2), 6000/(samplingRate/2)], btype='bandpass')
+        filt_array = sig.filtfilt(bb,ab,elec_array)        
+    else:
+        filt_array = np.zeros((len(file_list), count))
+        filtRange = [os.path.join(dataDir, filt_fold, f"Elec{i}{rangeStr}.bin") for i in file_list]
+        for i, f in enumerate(filtRange):
+            elec_array[i,:] = np.fromfile(f, dtype=np.int16, count=count)
+    
+    if draw_lfp:
+        bl,al = sig.butter(4, 50/(samplingRate/2), btype='lowpass')
+        lfp_array = sig.filtfilt(bl,al,elec_array)
+        lfp_array = lfp_array[:,1000:]
+        ccl = np.corrcoef(lfp_array)
+        
+    elec_array = elec_array[:,1000:]
+    filt_array = filt_array[:,1000:]
+    
+    ccr = np.corrcoef(elec_array)
+    ccf = np.corrcoef(filt_array)
+    if draw_lfp:
+        fig, ax = plt.subplots(figsize=(30,10), nrows=1, ncols=3, sharex=True)
+    else:
+        fig, ax = plt.subplots(figsize=(30,10), nrows=1, ncols=2, sharex=True)
+
+    cax = ax[0]
+    csr = cax.imshow(ccr)
+    cax.set_title(f'Raw correlation matrix')
+    cax.set_xticks(range(0, len(file_list)))
+    cax.set_xticklabels(file_list)
+    cax.set_yticks(range(0, len(file_list)))
+    cax.set_yticklabels(file_list)
+    fig.colorbar(csr, ax=ax[0])
+
+    cax = ax[1]
+    csf = cax.imshow(ccf)
+    cax.set_title(f'Spike correlation matrix')
+    cax.set_xticks(range(0, len(file_list)))
+    cax.set_xticklabels(file_list)
+    cax.set_yticks(range(0, len(file_list)))
+    cax.set_yticklabels(file_list)
+    fig.colorbar(csf, ax=ax[1])
+    if draw_lfp:
+        cax = ax[2]
+        csl = cax.imshow(ccl)
+        cax.set_title(f'LFP correlation matrix')
+        cax.set_xticks(range(0, len(file_list)))
+        cax.set_xticklabels(file_list)
+        cax.set_yticks(range(0, len(file_list)))
+        cax.set_yticklabels(file_list)
+        fig.colorbar(csl, ax=ax[2])
+    
+    return ccr, ccf
+
 
 if __name__ == "__main__":
     logging.basicConfig(format='%(asctime)s %(message)s', filename = 'preprocess log', level=logging.DEBUG)
