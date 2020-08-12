@@ -3,3 +3,7 @@ ppenv/
 .ipynb_checkpoints/
 __pycache__/
 
+.vscode/settings.json
+preprocess log
+preprocessing log
+
