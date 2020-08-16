@@ -4,7 +4,4 @@ ppenv/
 __pycache__/
 
 .vscode/settings.json
-preprocess log
-preprocessing log
-
 *.log
