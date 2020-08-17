@@ -413,10 +413,10 @@ def plot_channels(dataDir, fileList, elecList, num_seconds_to_plot=5, samplingRa
         fpath = os.path.join(dataDir, raw_fold, 'Elec' + str(elc) + rangeStr + '.bin')
         elec_data = np.fromfile(fpath,dtype=np.int16)
         spk_data=sig.filtfilt(bb,ab,elec_data)
-        ax[i*3].plot(t, elec_data[bs:be])
-        ax[i*3].set_title(f'Raw data channel {elc}')
-        ax[i*3+1].plot(t, spk_data[bs:be])
-        ax[i*3+1].set_title(f'Spiking data channel {elc}')
+        ax[i*2].plot(t, elec_data[bs:be])
+        ax[i*2].set_title(f'Raw data channel {elc}')
+        ax[i*2+1].plot(t, spk_data[bs:be])
+        ax[i*2+1].set_title(f'Spiking data channel {elc}')
 
 
 if __name__ == "__main__":
