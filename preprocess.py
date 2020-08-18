@@ -406,8 +406,10 @@ def plot_corr_mat(dataDir, rangeStr, file_list, raw_fold='binNew', filt_fold='bi
 
     return ccr, ccf
 
-def plot_channels(dataDir, fileList, elecList, num_seconds_to_plot=5, samplingRate=32000, bs=900000, ylim=[-700,700], raw_fold='binNew'):
-    fig, ax = plt.subplots(figsize=(20,len(elecList)*4), nrows=len(elecList)*2, ncols=1, sharex=True, sharey=True)
+
+def plot_channels(dataDir, fileList, elecList, num_seconds_to_plot=5, samplingRate=32000, bs=900000, ylim=[-700, 700],
+                  raw_fold='binNew'):
+    fig, ax = plt.subplots(figsize=(20, len(elecList) * 4), nrows=len(elecList) * 2, ncols=1, sharex=True, sharey=True)
     try:
         plt.ylim(ylim)
     except:
@@ -415,19 +417,18 @@ def plot_channels(dataDir, fileList, elecList, num_seconds_to_plot=5, samplingRa
     num_seconds_to_plot = 5
     samplingRate = 32000
     bs = 900000
-    be = int(bs+samplingRate*num_seconds_to_plot)
+    be = int(bs + samplingRate * num_seconds_to_plot)
     t = np.arange(bs, be, 1) / samplingRate
-    bb,ab = sig.butter(4, [300/(samplingRate/2), 6000/(samplingRate/2)], btype='bandpass')
+    bb, ab = sig.butter(4, [300 / (samplingRate / 2), 6000 / (samplingRate / 2)], btype='bandpass')
     for i, elc in enumerate(elecList):
         rangeStr = "-F{0}T{1}".format(fileList[0], fileList[-1])
         fpath = os.path.join(dataDir, raw_fold, 'Elec' + str(elc) + rangeStr + '.bin')
-        elec_data = np.fromfile(fpath,dtype=np.int16)
-        spk_data=sig.filtfilt(bb,ab,elec_data)
-        ax[i*2].plot(t, elec_data[bs:be])
-        ax[i*2].set_title(f'Raw data channel {elc}')
-        ax[i*2+1].plot(t, spk_data[bs:be])
-        ax[i*2+1].set_title(f'Spiking data channel {elc}')
-
+        elec_data = np.fromfile(fpath, dtype=np.int16)
+        spk_data = sig.filtfilt(bb, ab, elec_data)
+        ax[i * 2].plot(t, elec_data[bs:be])
+        ax[i * 2].set_title(f'Raw data channel {elc}')
+        ax[i * 2 + 1].plot(t, spk_data[bs:be])
+        ax[i * 2 + 1].set_title(f'Spiking data channel {elc}')
 
 if __name__ == "__main__":
     logging.basicConfig(format='%(asctime)s %(message)s', filename='preprocess log', level=logging.DEBUG)
