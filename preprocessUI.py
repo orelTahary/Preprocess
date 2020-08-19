@@ -45,7 +45,7 @@ def wirelessToDB():
     filesNum = fileList.__len__()
     basicRow.update({"files recorded": filesNum})
     updateDB(basicRow)
-    print(str(filesNum) + " files has been transformed from wireless to bin successfully")
+    print(str(filesNum) + " files has been converted from wireless to bin successfully")
 
 
 # The function converts wireless bin data to lfp bin data and updates the DB
@@ -54,7 +54,7 @@ def lfpToDB():
     pp.binToLFP(inDir + "binNew\\", inDir + "binLFP\\", fileFormat, elecList)
     basicRow.update({"lfp": elecList.__len__()})
     updateDB(basicRow)
-    print(str(elecList.__len__()) + " files has been transformed from lfp to bin successfully")
+    print(str(elecList.__len__()) + " files has been converted from lfp to bin successfully")
 
 
 # the function filters wireless bin data to bandpass bin data and updates the DB
@@ -63,12 +63,13 @@ def bandpassToDB():
     pp.bandpass_filter(inDir + "binNew\\", inDir + "binBand\\", fileFormat, elecList)
     basicRow.update({"Bandpass": elecList.__len__()})
     updateDB(basicRow)
-    print(str(elecList.__len__()) + " files has been transformed from bandpass to bin successfully")
+    print(str(elecList.__len__()) + " files has been converted from bandpass to bin successfully")
 
 
 # The function shows a single electrode data by path
-def showElectrode(path):
+def showElectrode(path, number):
     fig, axes = pp.plotBin(path, [10.05, 10.2])
+    axes.set_title('Electrode ' + str(number), fontsize=20)
     fig.set_size_inches((30, 5))
     matplotlib.pyplot.show(fig)
 
@@ -80,22 +81,23 @@ def filterGoodBad():
     badElecList = []
     # Present all electrodes
     for elec in elecList:
-        showElectrode(os.path.join(inDir + "binNew", "Elec" + str(elec) + rangeStr + ".bin"))
+        showElectrode(os.path.join(inDir + "binNew", "Elec" + str(elec) + rangeStr + ".bin"), elec)
         # Ask for an answer from the user
-        result = input("Enter good/bad")
+        result = input("Enter good/bad: ")
         if str(result) == "bad":
             badElecList.append(elec)
+            # remove bad electrode from elecList
+            elecList.remove(elec)
     # updates the bad electrodes
     basicRow.update({"Bad electrodes": badElecList})
     updateDB(basicRow)
-
-def displayInteraction():
-    ccr, ccf = pp.plot_corr_mat(inDir, rangeStr, elecList, raw_fold="binNew")
 
 
 # The function asks the user to analyze crosstalk of electrodes and asks him to enter them.
 # The DB gets updated after
 def crossTalkToDB():
+    ccr, ccf = pp.plot_corr_mat(inDir, rangeStr, elecList, raw_fold="binNew")
+    matplotlib.pyplot.show()
     result = input("Enter channels with crosstalk (a,b,c...) or write stop to finish: ")
     lisOfNumLists = []
     while result != "stop":
@@ -115,6 +117,14 @@ def crossTalkToDB():
     updateDB(basicRow)
 
 
+# The function removes the median from the good electrodes and updates the DB
+def removeMedian():
+    pp.remMedian(inDir + "binBand\\", inDir + "binMed\\", elecList, rangeStr)
+    basicRow.update({"median": elecList.__len__()})
+    updateDB(basicRow)
+    print(str(elecList.__len__()) + " files removed their median successfully")
+
+
 # inDir = input("Enter a Wireless Recordings path:")
 inDir = "D:\\Users\\Matan\\Downloads\\preprocess files test\\"
 # count the DT2 files
@@ -131,5 +141,5 @@ rangeStr = "-F{0}T{1}".format(fileList[0], fileList[-1])
 # lfpToDB()
 # bandpassToDB()
 # filterGoodBad()
-displayInteraction()
 # crossTalkToDB()
+removeMedian()

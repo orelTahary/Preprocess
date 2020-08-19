@@ -343,9 +343,9 @@ def bandpass_filter(inDir, outDir, filePattern, elecList, freq=[300, 6000], notc
 
 def plot_corr_mat(dataDir, rangeStr, file_list, raw_fold='binNew', filt_fold='binBand', draw_lfp=False):
     rawRange = [os.path.join(dataDir, raw_fold, f"Elec{i}{rangeStr}.bin") for i in file_list]
-    offset = 32000 * 90
-    count = 32000 * 240
-    samplingRate = 32000
+    offset = 3200 * 90
+    count = 3200 * 240
+    samplingRate = 3200
 
     elec_array = np.zeros((len(file_list), count))
     for i, f in enumerate(rawRange):
