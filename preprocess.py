@@ -3,6 +3,8 @@ from typing import List
 import numpy as np
 import os
 import scipy.signal as sig
+from scipy.stats import pearsonr
+from scipy.optimize import minimize
 from itertools import chain
 import matplotlib.pyplot as plt
 import pickle
@@ -181,8 +183,59 @@ def remMedian(inDir, outDir, elecList, rangeStr, batchSize=100000, verbose=False
             inBuffer[i, :] = data
         for i, elec in enumerate(elecList):
             notElec = list(range(0, i))+list(range(i+1, nElecs))
+
             outBuffer = inBuffer[i, :] - np.median(inBuffer[notElec, :], axis=0)
             outBuffer.astype(np.int16).tofile(ofids[elec])
+        location += data.shape[0]
+
+    # Close all the input and output files
+    closeFids(ifids, elecList)
+    closeFids(ofids, elecList)
+
+def raw_to_noise_correlation(k, signal, sigMedian):
+    return np.sum((signal - k*sigMedian)**2)
+
+def find_k(signal, sigMedian):
+    best_k = minimize(raw_to_noise_correlation,0, args=(signal, sigMedian))
+    return best_k
+#
+# Iterate over binary files and remove the median multiplied by a scalar
+#
+def remScaledMedian(inDir, outDir, elecList, rangeStr, batchSize=100000, verbose=False):
+    logging.info("started remMedian function")
+    nElecs = len(elecList)
+    safeOutputDir(outDir)
+    # Open all the input and output files
+    fileName = "{0}Elec{1}-F0T{2}.bin"
+    ifids = openFids(inDir, elecList, 'Elec{0}' + rangeStr + '.bin', "rb")
+    ofids = openFids(outDir, elecList, 'Elec{0}' + rangeStr + '.bin', "wb")
+
+    if verbose:
+        logging.info(f'File size {int(os.fstat(ifids[elecList[0]].fileno()).st_size/np.int16().itemsize)} samples')
+
+    # Remove median from each channel
+    location, readMore = 0, True
+    inBuffer = np.zeros((nElecs, batchSize), dtype=np.int16)
+    first = True
+    scalars = []
+    while readMore:
+        if verbose:
+            print(f'Location {location}')
+        for i, elec in enumerate(elecList):
+            data = np.fromfile(ifids[elec], count=batchSize, dtype=np.int16)
+            if i == 0 and data.shape[0] != batchSize:
+                inBuffer = np.zeros((nElecs, data.shape[0]), dtype=np.int16)
+                readMore = False
+            inBuffer[i, :] = data
+        for i, elec in enumerate(elecList):
+            notElec = list(range(0, i))+list(range(i+1, nElecs))
+            if first:
+                scalars.append(find_k(inBuffer[i, :], np.mean(inBuffer[notElec, :], axis=0)).x)            
+            outBuffer = inBuffer[i, :] - scalars[i]*np.mean(inBuffer[notElec, :], axis=0)
+            outBuffer.astype(np.int16).tofile(ofids[elec])
+        if first:
+            first = False
+            print(scalars)
         location += data.shape[0]
 
     # Close all the input and output files
@@ -422,8 +475,12 @@ def plot_channels(dataDir, fileList, elecList, num_seconds_to_plot=5, samplingRa
 if __name__ == "__main__":
     logging.basicConfig(format='%(asctime)s %(message)s', filename = 'preprocess log', level=logging.DEBUG)
     logging.debug('using main of preprocessing')
-    remMedian('/mnt/hgfs/vmshared/WLnew/', '/mnt/hgfs/vmshared/WLnew/out/',
-              list(chain(range(2, 15), range(17, 19), range(20, 32))), batchSize=100000, verbose=True)
+    # Enter correct inputs here
+    dataDir = "C:\\Data\\K6\\2020-03-19a\\WL\\"
+    elecList = list(range(2,33))
+    fileList = list(range(0,64))
+    rangeStr = "-F{0}T{1}".format(fileList[0], fileList[-1])
+    remScaledMedian(os.path.join(dataDir, 'binBand'), os.path.join(dataDir, 'binMedTest') , elecList, rangeStr, batchSize=1000000, verbose=True)
 
 # "{0}Elec{1}Motion.bin"
 # wirelessToMotion('/mnt/hgfs/vmshared/WLnew/','/mnt/hgfs/vmshared/WLnew/bin/',list(range(99,150)))
