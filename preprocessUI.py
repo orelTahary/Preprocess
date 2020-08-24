@@ -149,8 +149,8 @@ def spikingFiltering():
     updateDB(basicRow)
 
 
-# inDir = input("Enter a Wireless Recordings path:")
-inDir = "D:\\Users\\Matan\\Downloads\\preprocess files test\\"
+inDir = input("Enter a Wireless Recordings path:")
+# inDir = "D:\\Users\\Matan\\Downloads\\preprocess files test\\"
 # count the DT2 files
 DT2Files = [f for f in glob.glob(inDir + "\\*.DT2")]
 # create a list of numbers from 0 to the number of DT2 files
