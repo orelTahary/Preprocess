@@ -42,10 +42,9 @@ def updateDB(dictionary):
 # The function converts wireless data to bin data and updates the DB
 def wirelessToDB():
     pp.wirelessToBin(inDir, inDir + "binNew\\", fileList, elecList)
-    filesNum = fileList.__len__()
-    basicRow.update({"files recorded": filesNum})
+    basicRow.update({"files recorded": fileList.__len__()})
     updateDB(basicRow)
-    print(str(filesNum) + " files has been converted from wireless to bin successfully")
+    print(str(fileList.__len__()) + " files has been converted from wireless to bin successfully")
 
 
 # The function converts wireless bin data to lfp bin data and updates the DB
@@ -67,11 +66,11 @@ def bandpassToDB():
 
 
 # The function shows a single electrode data by path
-def showElectrode(path, number):
-    fig, axes = pp.plotBin(path, [10.05, 10.2])
-    axes.set_title('Electrode ' + str(number), fontsize=20)
+def showElectrode(path, elecNumber, plotLimit, title):
+    fig, axes = pp.plotBin(path, plotLimit)
+    axes.set_title('Electrode ' + str(elecNumber) + title, fontsize=20)
     fig.set_size_inches((30, 5))
-    matplotlib.pyplot.show(fig)
+    matplotlib.pyplot.show()
 
 
 # The function filters good/bad electrodes by user input.
@@ -81,13 +80,14 @@ def filterGoodBad():
     badElecList = []
     # Present all electrodes
     for elec in elecList:
-        showElectrode(os.path.join(inDir + "binNew", "Elec" + str(elec) + rangeStr + ".bin"), elec)
+        showElectrode(os.path.join(inDir + "binNew", "Elec" + str(elec) + rangeStr + ".bin"), elec, [10.05, 10.2], "")
         # Ask for an answer from the user
         result = input("Enter good/bad: ")
         if str(result) == "bad":
             badElecList.append(elec)
-            # remove bad electrode from elecList
-            elecList.remove(elec)
+    # remove all bad electrodes from elecList
+    for badElec in badElecList:
+        elecList.remove(badElec)
     # updates the bad electrodes
     basicRow.update({"Bad electrodes": badElecList})
     updateDB(basicRow)
@@ -119,10 +119,34 @@ def crossTalkToDB():
 
 # The function removes the median from the good electrodes and updates the DB
 def removeMedian():
-    pp.remMedian(inDir + "binBand\\", inDir + "binMed\\", elecList, rangeStr)
+    pp.remScaledMedian(inDir + "binBand\\", inDir + "binMed\\", elecList, rangeStr)
     basicRow.update({"median": elecList.__len__()})
     updateDB(basicRow)
     print(str(elecList.__len__()) + " files removed their median successfully")
+
+
+def plot5Sec(filePath, axes, elec, samplingRate=32000):
+    maxX = axes[1].dataLim.intervalx[1]
+    time = maxX / samplingRate
+    start = [0, 5]
+    end = [time - 5, time]
+    middle = [(time / 2) - 2.5, (time / 2) + 2.5]
+    showElectrode(filePath, elec, start, " Start")
+    showElectrode(filePath, elec, middle, " Middle")
+    showElectrode(filePath, elec, end, " End")
+
+
+def spikingFiltering():
+    unitsList = []
+    for elec in elecList:
+        filePath = os.path.join(inDir, "binMed\\", 'Elec' + str(elec) + rangeStr + '.bin')
+        axes = pp.plotAllBin(filePath)
+        plot5Sec(filePath, axes, elec)
+        result = input("Is possible unit? (yes/no)")
+        if result == "yes":
+            unitsList.append(elec)
+    basicRow.update({"possible spiking channels": unitsList})
+    updateDB(basicRow)
 
 
 # inDir = input("Enter a Wireless Recordings path:")
@@ -140,6 +164,7 @@ rangeStr = "-F{0}T{1}".format(fileList[0], fileList[-1])
 # wirelessToDB()
 # lfpToDB()
 # bandpassToDB()
-# filterGoodBad()
+filterGoodBad()
 # crossTalkToDB()
-removeMedian()
+# removeMedian()
+# spikingFiltering()

@@ -16,6 +16,7 @@ import scipy.io as sio
 
 __version__ = '0.0.5'
 
+
 # def logging_test():
 #     logging.debug('bli')
 #     logging.warning('blibli')
@@ -29,11 +30,11 @@ def plotWireless(fileName, plotLimit, channels, samplingRate=32000, nChannels=32
         logging.debug('input was not in the format of a list, corrected')
     fig, axes = plt.subplots()
     plotRange = range(plotLimit[0] * samplingRate, plotLimit[1] * samplingRate)
-    xRange: List[float] = [x/samplingRate for x in plotRange]
+    xRange: List[float] = [x / samplingRate for x in plotRange]
     with open(fileName, 'rb') as fid:
         allChannels = np.fromfile(fid, dtype=np.uint16)
     for channelNum in channels:
-        channel = (allChannels[channelNum-1::nChannels] - 32768).astype(np.int16)
+        channel = (allChannels[channelNum - 1::nChannels] - 32768).astype(np.int16)
         axes.plot(xRange, channel[plotRange], label=f'Elec {channelNum}')
     axes.set_xlabel('Time (s)')
     axes.set_title(f'File {fileName} Electrode {channelNum}')
@@ -48,21 +49,23 @@ def plotAO(fileDir, filePrefix, fileList, plotLimit, channels, samplingRate=4400
         logging.debug('input was not in the format of a list, corrected')
     fig, axes = plt.subplots()
     plotRange = range(plotLimit[0] * samplingRate, plotLimit[1] * samplingRate)
-    xRange: List[float] = [x/samplingRate for x in plotRange]
+    xRange: List[float] = [x / samplingRate for x in plotRange]
     for elecNum in channels:
         logging.info(f'Processing electrode {elecNum}')
         elecName = f'CRAW_{elecNum:03d}'
         elecData = [None] * len(fileList)
         for i, fileNum in enumerate(fileList):
             fileName = f'{fileDir}{filePrefix}{fileNum:04d}.mat'
-            matList=sio.loadmat(fileName, variable_names=elecName)
-            elecData[i] = matList[elecName][0,:]
+            matList = sio.loadmat(fileName, variable_names=elecName)
+            elecData[i] = matList[elecName][0, :]
         allData = np.concatenate(elecData)
         axes.plot(xRange, allData[plotRange], label=f'Elec {elecNum}')
     axes.set_xlabel(f'Time (s)')
     axes.set_title(f'AO files in {fileDir}, channels: {channels}')
     axes.legend(loc='upper left')
     return fig, axes
+
+
 #
 # Transform wireless files to concatenated binary, single electrode, files
 #
@@ -75,9 +78,9 @@ def wirelessToBin(inDir, outDir, files, elecList, nChannels=32, verbose=False):
     ofids = openFids(outDir, elecList, "Elec{0}" + rangeStr + ".bin", "wb")
     # Read each wireless file and separate to electrodes
     for file in files:
-        fileName = "{0}NEUR{1}{2}.DT2".format(inDir, '0'*(4-len(str(file))), file)
+        fileName = "{0}NEUR{1}{2}.DT2".format(inDir, '0' * (4 - len(str(file))), file)
         if not os.path.isfile(fileName):
-            fileName = "{0}BACK{1}{2}.DT2".format(inDir, '0'*(4-len(str(file))), file)
+            fileName = "{0}BACK{1}{2}.DT2".format(inDir, '0' * (4 - len(str(file))), file)
         if verbose:
             print(f'Transforming {fileName} to binary')
         fid = open(fileName, 'rb')
@@ -85,7 +88,7 @@ def wirelessToBin(inDir, outDir, files, elecList, nChannels=32, verbose=False):
         nSamples += fileData.shape[0] // nChannels
         for elec in elecList:
             try:
-                channelData = (fileData[elec-1::nChannels]-32768).astype(np.int16)
+                channelData = (fileData[elec - 1::nChannels] - 32768).astype(np.int16)
             except ValueError as err:
                 logging.error('channel or file defined as input does not exist')
             channelData.tofile(ofids[elec])
@@ -95,34 +98,35 @@ def wirelessToBin(inDir, outDir, files, elecList, nChannels=32, verbose=False):
     return nSamples
 
 
-def AOtoBin(fileDir, filePrefix, fileList, elecList, saveLfp=True, saveRaw=True, saveFilter=True, sampRate=44000, lfpBand = [2,300], filterBand=[300, 6000]):
-    bPass, aPass = sig.butter(4, [300/(sampRate/2),6000/(sampRate/2)], btype='bandpass')
+def AOtoBin(fileDir, filePrefix, fileList, elecList, saveLfp=True, saveRaw=True, saveFilter=True, sampRate=44000,
+            lfpBand=[2, 300], filterBand=[300, 6000]):
+    bPass, aPass = sig.butter(4, [300 / (sampRate / 2), 6000 / (sampRate / 2)], btype='bandpass')
     # [bf, af] = sig.butter(4, [f/(1000/2) for f in freq], btype='band')
-    bNotch, aNotch = sig.iirnotch(50/(1000/2), 30)
+    bNotch, aNotch = sig.iirnotch(50 / (1000 / 2), 30)
     for elecNum in elecList:
         elecName = f'CRAW_{elecNum:03d}'
         logging.info(f'Processing electrode: {elecName}')
         if saveRaw:
-            if not os.path.exists(os.path.join(fileDir,'Raw')):
-                os.mkdir(os.path.join(fileDir,'Raw'))
-            rawDir = os.path.join(fileDir,'Raw',"")
-            outRawFileName = f'{rawDir}{filePrefix}Raw{elecNum:03d}-{fileList[0]}-{fileList[-1]}.bin' 
+            if not os.path.exists(os.path.join(fileDir, 'Raw')):
+                os.mkdir(os.path.join(fileDir, 'Raw'))
+            rawDir = os.path.join(fileDir, 'Raw', "")
+            outRawFileName = f'{rawDir}{filePrefix}Raw{elecNum:03d}-{fileList[0]}-{fileList[-1]}.bin'
         if saveFilter:
-            if not os.path.exists(os.path.join(fileDir,'Filter')):
-                os.mkdir(os.path.join(fileDir,'Filter'))
-            fiterDir = os.path.join(fileDir,'Filter','')
-            outFilterFileName = f'{fiterDir}{filePrefix}Filter{elecNum:03d}-{fileList[0]}-{fileList[-1]}.bin' 
+            if not os.path.exists(os.path.join(fileDir, 'Filter')):
+                os.mkdir(os.path.join(fileDir, 'Filter'))
+            fiterDir = os.path.join(fileDir, 'Filter', '')
+            outFilterFileName = f'{fiterDir}{filePrefix}Filter{elecNum:03d}-{fileList[0]}-{fileList[-1]}.bin'
         if saveLfp:
-            if not os.path.exists(os.path.join(fileDir,'Lfp')):
-                os.mkdir(os.path.join(fileDir,'Lfp'))
-            lfpDir = os.path.join(fileDir,'Lfp','')
-            outLfpFileName = f'{lfpDir}{filePrefix}Lfp{elecNum:03d}-{fileList[0]}-{fileList[-1]}.bin' 
+            if not os.path.exists(os.path.join(fileDir, 'Lfp')):
+                os.mkdir(os.path.join(fileDir, 'Lfp'))
+            lfpDir = os.path.join(fileDir, 'Lfp', '')
+            outLfpFileName = f'{lfpDir}{filePrefix}Lfp{elecNum:03d}-{fileList[0]}-{fileList[-1]}.bin'
         elecData = [None] * len(fileList)
         for i, fileNum in enumerate(fileList):
             fileName = f'{fileDir}{filePrefix}{fileNum:04d}.mat'
             logging.info(f'Processing electrode: {fileName}')
-            matList=sio.loadmat(fileName, variable_names=elecName)
-            elecData[i] = matList[elecName][0,:]
+            matList = sio.loadmat(fileName, variable_names=elecName)
+            elecData[i] = matList[elecName][0, :]
         allData = np.concatenate(elecData)
         allData = allData.astype(np.int16)
         if saveRaw:
@@ -131,9 +135,11 @@ def AOtoBin(fileDir, filePrefix, fileList, elecList, saveLfp=True, saveRaw=True,
             filtData = sig.filtfilt(bPass, aPass, allData)
             filtData.astype(np.int16).tofile(outFilterFileName)
         if saveLfp:
-            lfpData = sig.decimate(allData, int(sampRate/1000), ftype='fir')
+            lfpData = sig.decimate(allData, int(sampRate / 1000), ftype='fir')
             lfpData = sig.filtfilt(bNotch, aNotch, lfpData)
             lfpData.astype(np.int16).tofile(outLfpFileName)
+
+
 #
 # Plot activity of electrode in a bin file
 #
@@ -141,8 +147,8 @@ def plotBin(fileName, plotLimit, samplingRate=32000, axes=None):
     logging.info("started plotBin function")
     if not axes:
         fig, axes = plt.subplots()
-    plotRange = range(int(plotLimit[0] * samplingRate), (int(plotLimit[1] * samplingRate) - 1 ))
-    xRange = [x/samplingRate for x in plotRange]
+    plotRange = range(int(plotLimit[0] * samplingRate), (int(plotLimit[1] * samplingRate) - 1))
+    xRange = [x / samplingRate for x in plotRange]
     try:
         with open(fileName, 'rb') as fid:
             channel = np.fromfile(fid, dtype=np.int16)
@@ -154,6 +160,30 @@ def plotBin(fileName, plotLimit, samplingRate=32000, axes=None):
     if 'fig' in locals():
         return fig, axes
     return axes
+
+
+def plotAllBin(fileName, samplingRate=32000, axes=None):
+    logging.info("started plotBin function")
+    if not axes:
+        fig, axes = plt.subplots()
+    try:
+        with open(fileName, 'rb') as fid:
+            channel = np.fromfile(fid, dtype=np.int16)
+            axes.plot(channel)
+            # maxX = axes.dataLim.intervalx[1]#1572863
+            # plotRange = range(0,int(maxX)-1)
+            # time = [x/samplingRate for x in plotRange]
+            # axes.plot(time,channel[plotRange])
+            axes.set_xlabel('Time (s)')
+            axes.set_title("All",fontsize=20)
+            fig.set_size_inches((30, 5))
+    except IOError:
+        logging.warning(f'Unable to open file: {fileName}')
+    if 'fig' in locals():
+        return fig, axes
+    return axes
+
+
 #
 # Iterate over binary files and remove the median
 #
@@ -167,7 +197,7 @@ def remMedian(inDir, outDir, elecList, rangeStr, batchSize=100000, verbose=False
     ofids = openFids(outDir, elecList, 'Elec{0}' + rangeStr + '.bin', "wb")
 
     if verbose:
-        logging.info(f'File size {int(os.fstat(ifids[elecList[0]].fileno()).st_size/np.int16().itemsize)} samples')
+        logging.info(f'File size {int(os.fstat(ifids[elecList[0]].fileno()).st_size / np.int16().itemsize)} samples')
 
     # Remove median from each channel
     location, readMore = 0, True
@@ -182,7 +212,7 @@ def remMedian(inDir, outDir, elecList, rangeStr, batchSize=100000, verbose=False
                 readMore = False
             inBuffer[i, :] = data
         for i, elec in enumerate(elecList):
-            notElec = list(range(0, i))+list(range(i+1, nElecs))
+            notElec = list(range(0, i)) + list(range(i + 1, nElecs))
 
             outBuffer = inBuffer[i, :] - np.median(inBuffer[notElec, :], axis=0)
             outBuffer.astype(np.int16).tofile(ofids[elec])
@@ -192,12 +222,16 @@ def remMedian(inDir, outDir, elecList, rangeStr, batchSize=100000, verbose=False
     closeFids(ifids, elecList)
     closeFids(ofids, elecList)
 
+
 def raw_to_noise_correlation(k, signal, sigMedian):
-    return np.sum((signal - k*sigMedian)**2)
+    return np.sum((signal - k * sigMedian) ** 2)
+
 
 def find_k(signal, sigMedian):
-    best_k = minimize(raw_to_noise_correlation,0, args=(signal, sigMedian))
+    best_k = minimize(raw_to_noise_correlation, 0, args=(signal, sigMedian))
     return best_k
+
+
 #
 # Iterate over binary files and remove the median multiplied by a scalar
 #
@@ -211,7 +245,7 @@ def remScaledMedian(inDir, outDir, elecList, rangeStr, batchSize=100000, verbose
     ofids = openFids(outDir, elecList, 'Elec{0}' + rangeStr + '.bin', "wb")
 
     if verbose:
-        logging.info(f'File size {int(os.fstat(ifids[elecList[0]].fileno()).st_size/np.int16().itemsize)} samples')
+        logging.info(f'File size {int(os.fstat(ifids[elecList[0]].fileno()).st_size / np.int16().itemsize)} samples')
 
     # Remove median from each channel
     location, readMore = 0, True
@@ -228,10 +262,10 @@ def remScaledMedian(inDir, outDir, elecList, rangeStr, batchSize=100000, verbose
                 readMore = False
             inBuffer[i, :] = data
         for i, elec in enumerate(elecList):
-            notElec = list(range(0, i))+list(range(i+1, nElecs))
+            notElec = list(range(0, i)) + list(range(i + 1, nElecs))
             if first:
-                scalars.append(find_k(inBuffer[i, :], np.mean(inBuffer[notElec, :], axis=0)).x)            
-            outBuffer = inBuffer[i, :] - scalars[i]*np.mean(inBuffer[notElec, :], axis=0)
+                scalars.append(find_k(inBuffer[i, :], np.mean(inBuffer[notElec, :], axis=0)).x)
+            outBuffer = inBuffer[i, :] - scalars[i] * np.mean(inBuffer[notElec, :], axis=0)
             outBuffer.astype(np.int16).tofile(ofids[elec])
         if first:
             first = False
@@ -241,6 +275,7 @@ def remScaledMedian(inDir, outDir, elecList, rangeStr, batchSize=100000, verbose
     # Close all the input and output files
     closeFids(ifids, elecList)
     closeFids(ofids, elecList)
+
 
 #
 # Transform wireless data to motion data
@@ -313,19 +348,20 @@ def wirelessToMotion(inDir, files, outDir=None, verbose=False, samplingRate=3200
 
     return df
 
+
 #
 # Transform wireless data to motion data
 #
 def binToLFP(inDir, outDir, filePattern, elecList, freq=[2, 300], notch=False, verbose=False):
     logging.info("started binToLFP function")
     safeOutputDir(outDir)
-    [bf, af] = sig.butter(4, [f/(1000/2) for f in freq], btype='band')
+    [bf, af] = sig.butter(4, [f / (1000 / 2) for f in freq], btype='band')
     for elec in elecList:
         inFileName = filePattern.format(inDir, str(elec))
         ifid = open(inFileName, 'rb')
         data = np.fromfile(ifid, dtype=np.int16)
         ifid.close()
-        sdata = sig.resample(data, num=data.shape[0]//32)
+        sdata = sig.resample(data, num=data.shape[0] // 32)
         sdata = sig.filtfilt(bf, af, sdata).astype(np.int16)
         if notch:
             F0, Q, Fs = 50, 35, 1000
@@ -336,6 +372,7 @@ def binToLFP(inDir, outDir, filePattern, elecList, freq=[2, 300], notch=False, v
         sdata.tofile(ofid)
         if verbose:
             print(f'Tranform binary file {inFileName} to LFP file {outFileName}')
+
 
 def openFids(dirName, elecList, filePattern, mode):
     fids = {}
@@ -348,9 +385,11 @@ def openFids(dirName, elecList, filePattern, mode):
             return {}
     return fids
 
+
 def closeFids(fids, elecList):
     for elec in elecList:
         fids[elec].close()
+
 
 def safeOutputDir(outDir):
     if outDir is not None and not os.path.isdir(outDir):
@@ -359,11 +398,11 @@ def safeOutputDir(outDir):
         except OSError:
             print("Creation of the output directory {0} failed".format(outDir))
 
-def bandpass_filter(inDir, outDir, filePattern, elecList, freq=[300, 6000], notch=False, verbose=False, Fs=32000):
 
+def bandpass_filter(inDir, outDir, filePattern, elecList, freq=[300, 6000], notch=False, verbose=False, Fs=32000):
     logging.info("started bandpass filter function")
     safeOutputDir(outDir)
-    [bf, af] = sig.butter(4, [f/(Fs/2) for f in freq], btype='band')
+    [bf, af] = sig.butter(4, [f / (Fs / 2) for f in freq], btype='band')
     for elec in elecList:
         inFileName = os.path.join(inDir, filePattern.format(str(elec)))
         ifid = open(inFileName, 'rb')
@@ -382,7 +421,6 @@ def bandpass_filter(inDir, outDir, filePattern, elecList, freq=[300, 6000], notc
 
 
 def plot_corr_mat(dataDir, rangeStr, file_list, raw_fold='binNew', filt_fold='binBand', draw_lfp=False):
-    
     rawRange = [os.path.join(dataDir, raw_fold, f"Elec{i}{rangeStr}.bin") for i in file_list]
     offset = 32000 * 90
     count = 32000 * 240
@@ -390,35 +428,33 @@ def plot_corr_mat(dataDir, rangeStr, file_list, raw_fold='binNew', filt_fold='bi
 
     elec_array = np.zeros((len(file_list), count))
     for i, f in enumerate(rawRange):
-        elec_array[i,:] = np.fromfile(f, dtype=np.int16, count=count)
-    
-    
-    
+        elec_array[i, :] = np.fromfile(f, dtype=np.int16, count=count)
+
     # print(os.path.isdir(os.path.join(dataDir, filt_fold)))
     if not os.path.isdir(os.path.join(dataDir, filt_fold)):
-        bb,ab = sig.butter(4, [300/(samplingRate/2), 6000/(samplingRate/2)], btype='bandpass')
-        filt_array = sig.filtfilt(bb,ab,elec_array)        
+        bb, ab = sig.butter(4, [300 / (samplingRate / 2), 6000 / (samplingRate / 2)], btype='bandpass')
+        filt_array = sig.filtfilt(bb, ab, elec_array)
     else:
         filt_array = np.zeros((len(file_list), count))
         filtRange = [os.path.join(dataDir, filt_fold, f"Elec{i}{rangeStr}.bin") for i in file_list]
         for i, f in enumerate(filtRange):
-            elec_array[i,:] = np.fromfile(f, dtype=np.int16, count=count)
-    
+            elec_array[i, :] = np.fromfile(f, dtype=np.int16, count=count)
+
     if draw_lfp:
-        bl,al = sig.butter(4, 50/(samplingRate/2), btype='lowpass')
-        lfp_array = sig.filtfilt(bl,al,elec_array)
-        lfp_array = lfp_array[:,1000:]
+        bl, al = sig.butter(4, 50 / (samplingRate / 2), btype='lowpass')
+        lfp_array = sig.filtfilt(bl, al, elec_array)
+        lfp_array = lfp_array[:, 1000:]
         ccl = np.corrcoef(lfp_array)
-        
-    elec_array = elec_array[:,1000:]
-    filt_array = filt_array[:,1000:]
-    
+
+    elec_array = elec_array[:, 1000:]
+    filt_array = filt_array[:, 1000:]
+
     ccr = np.corrcoef(elec_array)
     ccf = np.corrcoef(filt_array)
     if draw_lfp:
-        fig, ax = plt.subplots(figsize=(30,10), nrows=1, ncols=3, sharex=True)
+        fig, ax = plt.subplots(figsize=(30, 10), nrows=1, ncols=3, sharex=True)
     else:
-        fig, ax = plt.subplots(figsize=(30,10), nrows=1, ncols=2, sharex=True)
+        fig, ax = plt.subplots(figsize=(30, 10), nrows=1, ncols=2, sharex=True)
 
     cax = ax[0]
     csr = cax.imshow(ccr)
@@ -446,11 +482,13 @@ def plot_corr_mat(dataDir, rangeStr, file_list, raw_fold='binNew', filt_fold='bi
         cax.set_yticks(range(0, len(file_list)))
         cax.set_yticklabels(file_list)
         fig.colorbar(csl, ax=ax[2])
-    
+
     return ccr, ccf
 
-def plot_channels(dataDir, fileList, elecList, num_seconds_to_plot=5, samplingRate=32000, bs=900000, ylim=[-700,700], raw_fold='binNew'):
-    fig, ax = plt.subplots(figsize=(20,len(elecList)*4), nrows=len(elecList)*2, ncols=1, sharex=True, sharey=True)
+
+def plot_channels(dataDir, fileList, elecList, num_seconds_to_plot=5, samplingRate=32000, bs=900000, ylim=[-700, 700],
+                  raw_fold='binNew'):
+    fig, ax = plt.subplots(figsize=(20, len(elecList) * 4), nrows=len(elecList) * 2, ncols=1, sharex=True, sharey=True)
     try:
         plt.ylim(ylim)
     except:
@@ -458,29 +496,30 @@ def plot_channels(dataDir, fileList, elecList, num_seconds_to_plot=5, samplingRa
     num_seconds_to_plot = 5
     samplingRate = 32000
     bs = 900000
-    be = int(bs+samplingRate*num_seconds_to_plot)
+    be = int(bs + samplingRate * num_seconds_to_plot)
     t = np.arange(bs, be, 1) / samplingRate
-    bb,ab = sig.butter(4, [300/(samplingRate/2), 6000/(samplingRate/2)], btype='bandpass')
+    bb, ab = sig.butter(4, [300 / (samplingRate / 2), 6000 / (samplingRate / 2)], btype='bandpass')
     for i, elc in enumerate(elecList):
         rangeStr = "-F{0}T{1}".format(fileList[0], fileList[-1])
         fpath = os.path.join(dataDir, raw_fold, 'Elec' + str(elc) + rangeStr + '.bin')
-        elec_data = np.fromfile(fpath,dtype=np.int16)
-        spk_data=sig.filtfilt(bb,ab,elec_data)
-        ax[i*2].plot(t, elec_data[bs:be])
-        ax[i*2].set_title(f'Raw data channel {elc}')
-        ax[i*2+1].plot(t, spk_data[bs:be])
-        ax[i*2+1].set_title(f'Spiking data channel {elc}')
+        elec_data = np.fromfile(fpath, dtype=np.int16)
+        spk_data = sig.filtfilt(bb, ab, elec_data)
+        ax[i * 2].plot(t, elec_data[bs:be])
+        ax[i * 2].set_title(f'Raw data channel {elc}')
+        ax[i * 2 + 1].plot(t, spk_data[bs:be])
+        ax[i * 2 + 1].set_title(f'Spiking data channel {elc}')
 
 
 if __name__ == "__main__":
-    logging.basicConfig(format='%(asctime)s %(message)s', filename = 'preprocess log', level=logging.DEBUG)
+    logging.basicConfig(format='%(asctime)s %(message)s', filename='preprocess log', level=logging.DEBUG)
     logging.debug('using main of preprocessing')
     # Enter correct inputs here
     dataDir = "C:\\Data\\K6\\2020-03-19a\\WL\\"
-    elecList = list(range(2,33))
-    fileList = list(range(0,64))
+    elecList = list(range(2, 33))
+    fileList = list(range(0, 64))
     rangeStr = "-F{0}T{1}".format(fileList[0], fileList[-1])
-    remScaledMedian(os.path.join(dataDir, 'binBand'), os.path.join(dataDir, 'binMedTest') , elecList, rangeStr, batchSize=1000000, verbose=True)
+    remScaledMedian(os.path.join(dataDir, 'binBand'), os.path.join(dataDir, 'binMedTest'), elecList, rangeStr,
+                    batchSize=1000000, verbose=True)
 
 # "{0}Elec{1}Motion.bin"
 # wirelessToMotion('/mnt/hgfs/vmshared/WLnew/','/mnt/hgfs/vmshared/WLnew/bin/',list(range(99,150)))
