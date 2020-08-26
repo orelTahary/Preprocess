@@ -3,18 +3,58 @@ import os
 from tempfile import NamedTemporaryFile
 import shutil
 import csv
+from datetime import date
 import preprocess as pp
 import matplotlib.pyplot
+from github import Github
 
 
-# files location = D:\Users\Matan\Downloads\preprocess files test\
+# The function asks for a data base path and checks if it exists
+def getDBPath():
+    validPath = False
+    while not validPath:
+        path = os.path.join(input("Enter Data base path: "), 'ThemisDB.csv')
+        try:
+            open(path)
+            validPath = True
+        except OSError:
+            print("Couldn't find a data base! please check directories")
+    return path
+
+
+# The function asks for a wireless recordings directory, and checks there are files exists there
+# The function also tries to parse the directory and get animal data from it
+def getInDir():
+    validPath = False
+    while not validPath:
+        path = os.path.join(input("Enter a Wireless Recordings path: "))
+        try:
+            files = [f for f in glob.glob(os.path.join(path, "") + "*.DT2")]
+            if files.__len__() == 0:
+                raise OSError
+            getAnimalData(path)
+            validPath = True
+        except OSError:
+            print("Couldn't find wireless recordings! please check directories")
+    return path, files
+
+
+def getAnimalData(filePath):
+    directories = filePath.split(os.path.sep)
+    try:
+        animal = directories[-3]
+        sessionDate = date.fromisoformat(directories[-2])
+    except ValueError:
+        print("Couldn't get animal data! please check directories")
+    basicRow.update(
+        {"Animal": animal, "Date": str.format("{0}/{1}/{2}", sessionDate.day, sessionDate.month, sessionDate.year)})
+
+
 # The function gets a row as a dictionary and adds/updates the DB by it
 def updateDB(dictionary):
     # sets all the fields of the Data Base
     fields = ["Animal", "Date", "lfp", "Bandpass", "median", "files recorded",
               "Bad electrodes", "Crosstalk", "possible spiking channels", "Neurons after sorting"]
-    # The Data Base's path
-    DBPath = "D:\\Users\\Matan\\Downloads\\preprocess files test\\ThemisDB.csv"
     # Creates temporary file
     tempFile = NamedTemporaryFile(mode='w', delete=False, newline='')
     # reads from the DB
@@ -41,7 +81,7 @@ def updateDB(dictionary):
 
 # The function converts wireless data to bin data and updates the DB
 def wirelessToDB():
-    pp.wirelessToBin(inDir, inDir + "binNew\\", fileList, elecList)
+    pp.wirelessToBin(os.path.join(inDir, ""), os.path.join(inDir, "binNew"), fileList, elecList)
     basicRow.update({"files recorded": fileList.__len__()})
     updateDB(basicRow)
     print(str(fileList.__len__()) + " files has been converted from wireless to bin successfully")
@@ -50,7 +90,7 @@ def wirelessToDB():
 # The function converts wireless bin data to lfp bin data and updates the DB
 def lfpToDB():
     fileFormat = '{0}Elec{1}' + rangeStr + '.bin'
-    pp.binToLFP(inDir + "binNew\\", inDir + "binLFP\\", fileFormat, elecList)
+    pp.binToLFP(os.path.join(inDir, "binNew", ""), os.path.join(inDir, "binNew"), fileFormat, elecList)
     basicRow.update({"lfp": elecList.__len__()})
     updateDB(basicRow)
     print(str(elecList.__len__()) + " files has been converted from lfp to bin successfully")
@@ -59,7 +99,7 @@ def lfpToDB():
 # the function filters wireless bin data to bandpass bin data and updates the DB
 def bandpassToDB():
     fileFormat = "Elec{0}" + rangeStr + ".bin"
-    pp.bandpass_filter(inDir + "binNew\\", inDir + "binBand\\", fileFormat, elecList)
+    pp.bandpass_filter(os.path.join(inDir, "binNew", ""), os.path.join(inDir, "binBand"), fileFormat, elecList)
     basicRow.update({"Bandpass": elecList.__len__()})
     updateDB(basicRow)
     print(str(elecList.__len__()) + " files has been converted from bandpass to bin successfully")
@@ -76,15 +116,29 @@ def showElectrode(path, elecNumber, plotLimit, title):
 # The function filters good/bad electrodes by user input.
 # Each electrode is shown to the user and he enters good/bad
 # The DB gets updated after
-def filterGoodBad():
+def goodBadFiltering():
     badElecList = []
+    # asks for a second from the user. must be an integer
+    isNumber = False
+    while not isNumber:
+        second = input("Enter a second you wish to see the electrodes from: ")
+        try:
+            second = int(second)
+            isNumber = True
+        except ValueError:
+            print("Casting problem! Must be an integer")
     # Present all electrodes
     for elec in elecList:
-        showElectrode(os.path.join(inDir + "binNew", "Elec" + str(elec) + rangeStr + ".bin"), elec, [10.05, 10.2], "")
+        showElectrode(os.path.join(inDir, "binNew", "Elec" + str(elec) + rangeStr + ".bin"),
+                      elec, [int(second), int(second) + 5], "")
         # Ask for an answer from the user
         result = input("Enter good/bad: ")
-        if str(result) == "bad":
-            badElecList.append(elec)
+        while str(result) != "bad" and str(result) != "good":
+            if str(result) == "bad":
+                badElecList.append(elec)
+            elif str(result) != "good":
+                print("Type error, please try again")
+                result = input("Enter good/bad: ")
     # remove all bad electrodes from elecList
     for badElec in badElecList:
         elecList.remove(badElec)
@@ -119,7 +173,7 @@ def crossTalkToDB():
 
 # The function removes the median from the good electrodes and updates the DB
 def removeMedian():
-    pp.remScaledMedian(inDir + "binBand\\", inDir + "binMed\\", elecList, rangeStr)
+    pp.remScaledMedian(os.path.join(inDir, "binBand", ""), os.path.join(inDir, "binMed"), elecList, rangeStr)
     basicRow.update({"median": elecList.__len__()})
     updateDB(basicRow)
     print(str(elecList.__len__()) + " files removed their median successfully")
@@ -139,32 +193,53 @@ def plot5Sec(filePath, axes, elec, samplingRate=32000):
 def spikingFiltering():
     unitsList = []
     for elec in elecList:
-        filePath = os.path.join(inDir, "binMed\\", 'Elec' + str(elec) + rangeStr + '.bin')
+        filePath = os.path.join(inDir, "binMed", 'Elec' + str(elec) + rangeStr + '.bin')
         axes = pp.plotAllBin(filePath)
         plot5Sec(filePath, axes, elec)
-        result = input("Is possible unit? (yes/no)")
+        result = input("Is a possible unit? (yes/no)")
         if result == "yes":
             unitsList.append(elec)
     basicRow.update({"possible spiking channels": unitsList})
     updateDB(basicRow)
 
 
-inDir = input("Enter a Wireless Recordings path:")
-# inDir = "D:\\Users\\Matan\\Downloads\\preprocess files test\\"
-# count the DT2 files
-DT2Files = [f for f in glob.glob(inDir + "\\*.DT2")]
+def addDBToGit():
+    # MatanNoach's access token
+    g = Github("980c4ec6b0b3f2b801ae468786c7fc4b89433cd5")
+    repo = g.get_repo("orelTahary/Preprocess")
+    oldFile = repo.get_contents("ThemisDB.csv")
+    with open(DBPath, 'rb') as fd:
+        contents = fd.read()
+        try:
+            repo.update_file(path="ThemisDB.csv", message="Updating DB", content=contents, sha=oldFile.sha)
+            print("File ThemisDB.csv updated successfully on github")
+        except FileNotFoundError:
+            print("File does not exist on github. creating a new one")
+            try:
+                repo.create_file(path="ThemisDB.csv", message="Updating DB", content=contents)
+                print("File ThemisDB.csv created successfully on github")
+            except RuntimeError:
+                print("There was a problem while creating the file on github")
+
+
+# asks for data base and directory paths
+basicRow = {}
+DBPath = getDBPath()
+inDir, DT2Files = getInDir()
 # create a list of numbers from 0 to the number of DT2 files
 fileList = list(range(0, DT2Files.__len__()))
+# create a rangeStr string format
+rangeStr = "-F{0}T{1}".format(fileList[0], fileList[-1])
 # create a list of electrodes numbers from 2 to 33
 elecList = list(range(2, 33))
-# example for a basic row Data
-basicRow = {"Animal": "K6", "Date": "20/03/2020"}
-rangeStr = "-F{0}T{1}".format(fileList[0], fileList[-1])
 
-# wirelessToDB()
-# lfpToDB()
-# bandpassToDB()
-filterGoodBad()
-# crossTalkToDB()
-# removeMedian()
-# spikingFiltering()
+wirelessToDB()
+lfpToDB()
+bandpassToDB()
+goodBadFiltering()
+crossTalkToDB()
+removeMedian()
+spikingFiltering()
+addDBToGit()
+
+
