@@ -162,7 +162,8 @@ def plotBin(fileName, plotLimit, samplingRate=32000, axes=None):
     return axes
 
 
-def plotAllBin(fileName, samplingRate=32000, axes=None):
+# The function plots a whole electrode Data set
+def plotAllBin(fileName, elecNumber, samplingRate=32000, axes=None):
     logging.info("started plotBin function")
     if not axes:
         fig, axes = plt.subplots()
@@ -170,18 +171,37 @@ def plotAllBin(fileName, samplingRate=32000, axes=None):
         with open(fileName, 'rb') as fid:
             channel = np.fromfile(fid, dtype=np.int16)
             axes.plot(channel)
-            # maxX = axes.dataLim.intervalx[1]#1572863
-            # plotRange = range(0,int(maxX)-1)
-            # time = [x/samplingRate for x in plotRange]
-            # axes.plot(time,channel[plotRange])
             axes.set_xlabel('Time (s)')
-            axes.set_title("All",fontsize=20)
+            axes.set_title("All electrode " + elecNumber, fontsize=20)
             fig.set_size_inches((30, 5))
     except IOError:
         logging.warning(f'Unable to open file: {fileName}')
     if 'fig' in locals():
         return fig, axes
     return axes
+
+
+# The function shows a single electrode data by path
+def showElectrode(path, elecNumber, plotLimit, title):
+    fig, axes = plotBin(path, plotLimit)
+    axes.set_title('Electrode ' + str(elecNumber) + title, fontsize=20)
+    fig.set_size_inches((30, 5))
+    plt.show()
+
+
+# The function plot 5 seconds from the start, middle and ending of the data set
+def plot5Sec(filePath, axes, elec, samplingRate=32000):
+    # finds max X value of the data set
+    maxX = axes[1].dataLim.intervalx[1]
+    # divide by sampling rate to get the time
+    time = maxX / samplingRate
+    # show start middle and end
+    start = [0, 5]
+    end = [time - 5, time]
+    middle = [(time / 2) - 2.5, (time / 2) + 2.5]
+    showElectrode(filePath, elec, start, " Start")
+    showElectrode(filePath, elec, middle, " Middle")
+    showElectrode(filePath, elec, end, " End")
 
 
 #
@@ -422,9 +442,9 @@ def bandpass_filter(inDir, outDir, filePattern, elecList, freq=[300, 6000], notc
 
 def plot_corr_mat(dataDir, rangeStr, file_list, raw_fold='binNew', filt_fold='binBand', draw_lfp=False):
     rawRange = [os.path.join(dataDir, raw_fold, f"Elec{i}{rangeStr}.bin") for i in file_list]
-    offset = 32000 * 90
-    count = 32000 * 240
-    samplingRate = 32000
+    offset = 3200 * 90
+    count = 3200 * 240
+    samplingRate = 3200
 
     elec_array = np.zeros((len(file_list), count))
     for i, f in enumerate(rawRange):

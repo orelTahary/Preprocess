@@ -39,6 +39,7 @@ def getInDir():
     return path, files
 
 
+# the function parses the directories to get the animal data
 def getAnimalData(filePath):
     directories = filePath.split(os.path.sep)
     try:
@@ -105,14 +106,6 @@ def bandpassToDB():
     print(str(elecList.__len__()) + " files has been converted from bandpass to bin successfully")
 
 
-# The function shows a single electrode data by path
-def showElectrode(path, elecNumber, plotLimit, title):
-    fig, axes = pp.plotBin(path, plotLimit)
-    axes.set_title('Electrode ' + str(elecNumber) + title, fontsize=20)
-    fig.set_size_inches((30, 5))
-    matplotlib.pyplot.show()
-
-
 # The function filters good/bad electrodes by user input.
 # Each electrode is shown to the user and he enters good/bad
 # The DB gets updated after
@@ -129,8 +122,8 @@ def goodBadFiltering():
             print("Casting problem! Must be an integer")
     # Present all electrodes
     for elec in elecList:
-        showElectrode(os.path.join(inDir, "binNew", "Elec" + str(elec) + rangeStr + ".bin"),
-                      elec, [int(second), int(second) + 5], "")
+        pp.showElectrode(os.path.join(inDir, "binNew", "Elec" + str(elec) + rangeStr + ".bin"),
+                         elec, [int(second), int(second) + 5], "")
         # Ask for an answer from the user
         result = input("Enter good/bad: ")
         while str(result) != "bad" and str(result) != "good":
@@ -179,45 +172,45 @@ def removeMedian():
     print(str(elecList.__len__()) + " files removed their median successfully")
 
 
-def plot5Sec(filePath, axes, elec, samplingRate=32000):
-    maxX = axes[1].dataLim.intervalx[1]
-    time = maxX / samplingRate
-    start = [0, 5]
-    end = [time - 5, time]
-    middle = [(time / 2) - 2.5, (time / 2) + 2.5]
-    showElectrode(filePath, elec, start, " Start")
-    showElectrode(filePath, elec, middle, " Middle")
-    showElectrode(filePath, elec, end, " End")
-
-
+# The function shows 5 seconds from each electrode's start, middle and ending
+# And asks the user if it is a possible unit
 def spikingFiltering():
     unitsList = []
     for elec in elecList:
         filePath = os.path.join(inDir, "binMed", 'Elec' + str(elec) + rangeStr + '.bin')
-        axes = pp.plotAllBin(filePath)
-        plot5Sec(filePath, axes, elec)
+        axes = pp.plotAllBin(filePath, elec)
+        pp.plot5Sec(filePath, axes, elec)
         result = input("Is a possible unit? (yes/no)")
-        if result == "yes":
-            unitsList.append(elec)
+        while str(result) != "yes" and str(result) != "no":
+            if str(result) == "yes":
+                unitsList.append(elec)
+            elif str(result) != "no":
+                result = input("Is a possible unit? (yes/no)")
     basicRow.update({"possible spiking channels": unitsList})
     updateDB(basicRow)
 
 
+# the function adds/updates the file in the gitHub repository
 def addDBToGit():
     # MatanNoach's access token
     g = Github("980c4ec6b0b3f2b801ae468786c7fc4b89433cd5")
+    # gets the repository
     repo = g.get_repo("orelTahary/Preprocess")
     oldFile = repo.get_contents("ThemisDB.csv")
     with open(DBPath, 'rb') as fd:
+        # reads the DB content as bytes
         contents = fd.read()
+        # tries to update the file in the repository
         try:
             repo.update_file(path="ThemisDB.csv", message="Updating DB", content=contents, sha=oldFile.sha)
             print("File ThemisDB.csv updated successfully on github")
         except FileNotFoundError:
+            # if the file does not exist, try to add it to the repository
             print("File does not exist on github. creating a new one")
             try:
                 repo.create_file(path="ThemisDB.csv", message="Updating DB", content=contents)
                 print("File ThemisDB.csv created successfully on github")
+            # in case there was a problem, throw an exception
             except RuntimeError:
                 print("There was a problem while creating the file on github")
 
@@ -232,7 +225,7 @@ fileList = list(range(0, DT2Files.__len__()))
 rangeStr = "-F{0}T{1}".format(fileList[0], fileList[-1])
 # create a list of electrodes numbers from 2 to 33
 elecList = list(range(2, 33))
-
+# start the whole process
 wirelessToDB()
 lfpToDB()
 bandpassToDB()
@@ -241,5 +234,3 @@ crossTalkToDB()
 removeMedian()
 spikingFiltering()
 addDBToGit()
-
-
