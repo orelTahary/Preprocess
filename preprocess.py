@@ -300,12 +300,19 @@ def remScaledMedian(inDir, outDir, elecList, rangeStr, batchSize=100000, verbose
 #
 # Transform wireless data to motion data
 #
-def wirelessToMotion(inDir, files, outDir=None, verbose=False, samplingRate=32000):
+def wirelessToMotion(inDir, files, outDir=None, filepfx='NEUR', verbose=False, samplingRate=32000):
     logging.info("started wirelessToMotion function")
     motionData = np.empty(shape=0)
     # Read each wireless file
     for file in files:
-        fileName = '{0}NEUR{1}{2}.DT2'.format(inDir, '0' * (4 - len(str(file))), file)
+        if type (file) is str:
+            fileName = file
+        else:
+            fileName =  f'{filepfx}{file:04d}.DT2'
+
+        if not inDir is None:
+            fileName = os.path.join (inDir, fileName)
+        # fileName = '{0}NEUR{1}{2}.DT2'.format(inDir, '0' * (4 - len(str(file))), file)
         if verbose:
             print(f'Read raw file {fileName}')
         fid = open(fileName, 'rb')
