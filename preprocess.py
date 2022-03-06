@@ -322,17 +322,15 @@ def wirelessToMotion(inDir, files, outDir=None, filepfx='NEUR', verbose=False, s
 
     bBlock = range(0, motionData.shape[0], 1024)
     nBlock = len(bBlock)
-    print(f'Total data length: {motionData.shape[0]} Number of blocks {nBlock}')
+    logging.info(f'Total data length: {motionData.shape[0]} Number of blocks {nBlock}')
     blockIndex = {"acc": (2, 6, np.zeros((nBlock, 2), dtype=np.int32)),
                   "gyr": (3, 7, np.zeros((nBlock, 2), dtype=np.int32)),
                   "mag": (4, 8, np.zeros((nBlock, 2), dtype=np.int32))}
     for i, block in enumerate(bBlock):
         if motionData[block] != 13579 or motionData[block + 1] != 24680:
-            print('Error in block {0} (#1 {1} #2 {2})'
-                  .format(i, motionData[block], motionData[block + 1]))
+            logging.warning(f'Error in block {i} - Block starts with ({int(motionData[block])},{int(motionData[block + 1])}) instead of (13579,24680)')
         else:
             for index in blockIndex:
-                # print(motionData[block+blockIndex[index][0]])
                 blockIndex[index][2][i, 0] = motionData[block + blockIndex[index][0]]
                 blockIndex[index][2][i, 1] = motionData[block + blockIndex[index][1]]
     totalLen = {index: int(np.sum(blockIndex[index][2][:, 1]) / 3) for index in blockIndex}
@@ -362,14 +360,14 @@ def wirelessToMotion(inDir, files, outDir=None, filepfx='NEUR', verbose=False, s
         for axis in axes:
             msMotionData = kinematics[sensor][axis].shape[0]
             if msMotionData != msElecData:
-                print(f'Adjust ASYNC {sensor} {axis} acquisition data({msElecData}ms) != motion({msMotionData}ms)')
+                logging.warning(f'Resample {sensor} {axis} - acquisition data({msElecData}ms) != motion({msMotionData}ms)')
                 kinematics[sensor][axis] = sig.resample(kinematics[sensor][axis], msElecData).astype(np.int16)
             df[sensor, axis] = kinematics[sensor][axis]
 
     if outDir is not None:
         safeOutputDir(outDir)
         fileName = "{0}Motion-F{1}T{2}.pkl".format(outDir, files[0], files[-1])
-        print(fileName)
+        logging.info(f'Writing output to file {fileName}')
         with open(fileName, 'wb') as file:
             pickle.dump(df, file)
 
@@ -536,6 +534,86 @@ def plot_channels(dataDir, fileList, elecList, num_seconds_to_plot=5, samplingRa
         ax[i * 2 + 1].plot(t, spk_data[bs:be])
         ax[i * 2 + 1].set_title(f'Spiking data channel {elc}')
 
+def trimoscillations (data, clip=30000, hp=None, lp=None, fs=1000):
+    """
+    Trim accelerations erroneous oscillations, occuring as a result of
+    bumping the device. Two passes are done:
+    1. Remove oscillations of +/- limit and replace with interpolation.
+    2. Use a LPF on the data.
+
+    Parameters:
+    data - The kinematic data as dataframe.
+    clip - The limits to clip in the multiple oscillations (None skips).
+    filtfreq - The filter frequency (None skips).
+
+    Returns:
+    The data trimmed.
+    """
+    
+    SENSORS = [ 'acc', 'gyr', 'mag' ]
+    AXES = [ 'x', 'y', 'z' ]
+
+    data = data.astype (float)
+    if clip != None:
+        dims = [(sensor, ax) for sensor in SENSORS for ax in AXES]
+        smeardims = [(sensor, ax) for sensor in SENSORS for ax in AXES]
+        smearindex = [dim in smeardims for dim in dims]
+        #
+        # Find values crossing the clip window.
+        #
+        extremes = (
+            ((data.iloc [:-1] [dims] >  clip).to_numpy () &
+             (data.iloc [1:]  [dims] < -clip).to_numpy ()) |
+            ((data.iloc [:-1] [dims] < -clip).to_numpy () &
+             (data.iloc [1:]  [dims] >  clip).to_numpy ())
+        )
+        #
+        # Smear the extremes right and left to take care of the boundaries.
+        #
+        extremes [:-1, smearindex] |= extremes [1:, smearindex]
+        extremes [:-2, smearindex] |= extremes [2:, smearindex]
+        extremes [4:, smearindex] |= extremes [:-4, smearindex]
+        #
+        # For each axis find the regions and interpolate.
+        #
+        for iax, (sensor, ax) in enumerate (dims):
+            # Locate start and end of regions.
+            bregions = np.where ((extremes [:-1, iax] == False) &
+                                 (extremes [1:, iax] == True)) [0]
+            eregions = np.where ((extremes [:-1, iax] == True) &
+                                 (extremes [1:, iax] == False)) [0]
+            # Ensure all regions have a beginning and an end.
+            if extremes [0, iax]:
+                bregions = np.insert (bregions, 0, [0])
+            if extremes [-1, iax]:
+                eregions = np.append (eregions, extremes.shape [0]+1)
+            # Iterate over regions and interpolate
+            for btime, etime in zip (bregions, eregions):
+                btime = int (btime) + 1
+                etime = int (etime) + 1
+
+                # if self.verbose >= 1:
+                #     logging.info (f'Region axis: {sensor} {ax} {btime}:{etime}')
+
+                begin = data.index [btime]
+                end = data.index [etime]
+                data.loc [begin:end, (sensor, ax)] = (
+                    np.linspace (data.iloc [begin] [sensor, ax],
+                                 data.iloc [end] [sensor, ax],
+                                 num = end - begin + 1)
+                    )
+
+    if lp != None:
+        columns = list ((sensor, axis) for sensor in SENSORS
+                        for axis in AXES)
+        if hp != None:
+            b, a = sig.butter (4, [hp / (fs / 2), lp / (fs / 2)], btype='bandpass')
+        else:
+            b, a = sig.butter (4, lp / (fs / 2))
+        out = sig.filtfilt (b, a, data [columns].to_numpy ().T).astype (int)
+        data [columns] = out.T
+
+    return data
 
 if __name__ == "__main__":
     logging.basicConfig(format='%(asctime)s %(message)s', filename='preprocess log', level=logging.DEBUG)
