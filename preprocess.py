@@ -72,15 +72,29 @@ def plotAO(fileDir, filePrefix, fileList, plotLimit, channels, samplingRate=4400
 def wirelessToBin(inDir, outDir, files, elecList, nChannels=32, verbose=False):
     logging.info('started wirelessToBin function')
     nSamples = 0
-    safeOutputDir(outDir)
+    if not (outDir is None):
+        safeOutputDir(outDir)
     # Open all the output files
-    rangeStr = "-F{0}T{1}".format(files[0], files[-1])
-    ofids = openFids(outDir, elecList, "Elec{0}" + rangeStr + ".bin", "wb")
+    if not (outDir is None):
+        rangeStr = "-F{0}T{1}".format(files[0], files[-1])
+        ofids = openFids(outDir, elecList, "Elec{0}" + rangeStr + ".bin", "wb")
     # Read each wireless file and separate to electrodes
     for file in files:
-        fileName = "{0}NEUR{1}{2}.DT2".format(inDir, '0' * (4 - len(str(file))), file)
-        if not os.path.isfile(fileName):
-            fileName = "{0}BACK{1}{2}.DT2".format(inDir, '0' * (4 - len(str(file))), file)
+        fileName = file
+        if type (fileName) != str:
+            fileName0 = f'NEUR{file:04d}.DT2'
+            fileName1 = f'BACK{file:04d}.DT2'
+        else:
+            fileName0 = fileName
+        if not (inDir is None):
+            fileName0 = os.path.join (inDir, fileName0)
+            fileName1 = os.path.join (inDir, fileName1)
+        # fileName = "{0}NEUR{1}{2}.DT2".format(inDir, '0' * (4 - len(str(file))), file)
+        if os.path.isfile(fileName0):
+            fileName = fileName0
+        else:
+            fileName = fileName1
+            # fileName = "{0}BACK{1}{2}.DT2".format(inDir, '0' * (4 - len(str(file))), file)
         if verbose:
             print(f'Transforming {fileName} to binary')
         fid = open(fileName, 'rb')
@@ -91,10 +105,12 @@ def wirelessToBin(inDir, outDir, files, elecList, nChannels=32, verbose=False):
                 channelData = (fileData[elec - 1::nChannels] - 32768).astype(np.int16)
             except ValueError as err:
                 logging.error('channel or file defined as input does not exist')
-            channelData.tofile(ofids[elec])
+            if not (outDir is None):
+                channelData.tofile(ofids[elec])
         fid.close()
     # Close all the output files
-    closeFids(ofids, elecList)
+    if not (outDir is None):
+        closeFids(ofids, elecList)
     return nSamples
 
 
