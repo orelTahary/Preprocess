@@ -318,14 +318,19 @@ def remScaledMedian(inDir, outDir, elecList, rangeStr, batchSize=100000, verbose
 #
 DATAFILELEN = 16*1024*1024
 DATANCHANNELS=32
+DATAFREQ=32000
 DMCHANNEL=0
 DMSIGNATURE = np.array ([13579, 24680])
 DMTSFACTOR = 16
 DMSAMPLERATE= 1000 # Hz
 DATAMAGNETSAMPLERATE= 111 # Hz
 DMHEADERSIZE = 12
-
-#
+BLOCKLEN = 64*1024
+BLOCKSIGNATURE = [
+    0x90ef, 0x5678, 0xabcd, 0x1234, # Signature
+    0x1, 0x0,                       # Format version.
+    0x0, 0x1                        # Size of block (64KB)
+]
 # Find runs of ones. See
 # https://newbedev.com/find-length-of-sequences-of-identical-values-in-a-numpy-array-run-length-encoding
 #
@@ -354,6 +359,99 @@ start, finish, length - Start, finish and length of runs of 1-s in bits array.
     finish, = np.where (diffs < 0)
     return begin, finish, finish-begin
 
+#
+# Transform wireless data to neural data
+#
+def wirelessToChannels (base, files, outdir=None, prefix='NEUR',
+                        verbose=False, tolerance=2, blocktolerance=3,
+                        nchannels=DATANCHANNELS, freq=DATAFREQ):
+    logging.info("started wirelessToMotion function")
+    sensors = ['acc', 'gyr', 'mag']
+    axes = ['x', 'y', 'z']
+    files = (f if type (f) is str else f'{prefix}{f:04d}.DT2'
+             for f in files)
+    if not base is None:
+        files = (os.path.join (base, datafile) for datafile in files)
+
+    channeldata = []
+    btimestamps = []
+    for datafile in files:
+        if verbose:
+            print(f'Read raw file {datafile}')
+
+        fd = open(datafile, 'rb')
+        data = np.fromfile(fd, dtype=np.uint16)
+        fd.close()
+
+        # Data files should be fixed length.
+        if len (data)*2 != DATAFILELEN:
+            raise Exception (f'File {datafile} size is {len (data)*2}!')
+
+        # File is composed of 64KB blocks.
+        blocks = data.reshape (-1, BLOCKLEN // 2)
+        # Test blocks signatures.
+        goodblocks = np.all (blocks [:, :len(BLOCKSIGNATURE)] == BLOCKSIGNATURE,
+                             axis=1)
+        # Extract timestamps.
+        timestamps = np.dot (blocks [:, 8:10], [[1], [2**16]])
+        timestamps = timestamps.astype (np.uint32).reshape (-1)
+        # Extract data partitions.
+        # Partition info are 3 uint32: Type, Start, Length.
+        nblocks = len (blocks)
+        compmat = (np.diag (np.ones (7*6)) [::2] +
+                   np.diag (np.ones (7*6)) [1::2] * 2**16).T
+        partinfo = np.dot (blocks [:, 12:54], compmat).reshape (nblocks, -1, 3)
+        # Get reference to neuronal data.
+        ind0, ind1 = np.where (partinfo [goodblocks, :, 0] == 2)
+        if np.any (np.unique (ind0, return_counts=True) [1] > 1):
+            raise f'Non unique neuronal data partition in {datafile}'
+
+        # Extract the neuronal data.
+        ilast, plast = ind0 [-1], ind1 [-1]
+        t0, tn = timestamps [ind0 [0]], timestamps [ilast]
+        if len (btimestamps) > 0 and btimestamps [-1] [1] != t0:
+            if verbose:
+                logging.warning (f'Timestamp discontinuity between files '+
+                                 f'{btimestamps [-1] [1]}..{t0})')
+                logging.warning ('Adjusting blocks.')
+            diff = t0 - btimestamps [-1] [1]
+            if diff > 0:
+                # Pad with zeros
+                channeldata.append (np.zeros (
+                    (int (diff * DATAFREQ // 1000), nchannels)
+                ))
+            else:
+                # Truncate previous data.
+                index = len (channeldata)-1
+                while diff > 0 and index >= 0:
+                    trunc = int (diff * DATAFREQ // 1000)
+                    if trunc > len (channeldata [index]):
+                        trunc = len (channeldata [index])
+                    channeldata [index] = channeldata [index] [:trunc]
+                    index -= 1
+        channels = np.zeros ((int ((tn - t0) * DATAFREQ // 1000 +
+                                   partinfo [ilast, plast, 2] // (2*nchannels)),
+                              nchannels), dtype=np.int16)
+        prevend = -1
+        for i0, i1, ti in zip (ind0, ind1, timestamps [ind0]):
+            _, start, length = partinfo [i0, i1]
+            # Timestamp is too coarse, but we assume it's precise. It may cause
+            # a glitch once in a while, but it seems the data is synchronised to
+            # the timestamp.
+            cs = (ti-t0) * int(DATAFREQ // 1000)
+            ce = cs + int (length // (2*nchannels))
+#            print (cs, ce, ce - cs, length // (2*nchannels))
+            # print (channels [cs:ce, :].shape)
+            # print (blocks [i0, int (start // 2):int ((start + length) // 2)]
+            #     .reshape (-1, nchannels).shape)
+            channels [cs:ce, :] = (
+                blocks [i0, int (start // 2):int ((start + length) // 2)]
+                .reshape (-1, nchannels) - 2**15
+                ).astype (np.int16)
+            prevend = ti + (length // (2*nchannels*(DATAFREQ // 1000)))
+        channeldata.append (channels)
+        btimestamps.append ([t0, prevend])
+    return np.concatenate (channeldata), btimestamps
 #
 # Transform wireless data to motion data
 #
