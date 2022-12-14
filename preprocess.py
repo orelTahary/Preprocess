@@ -1,6 +1,7 @@
 from typing import List
 
 import numpy as np
+import numbers
 import os
 import scipy.signal as sig
 from scipy.stats import pearsonr
@@ -10,6 +11,7 @@ import matplotlib.pyplot as plt
 import pickle
 import pandas as pd
 import logging
+import re
 import sys
 from datetime import datetime
 import scipy.io as sio
@@ -64,7 +66,6 @@ def plotAO(fileDir, filePrefix, fileList, plotLimit, channels, samplingRate=4400
     axes.set_title(f'AO files in {fileDir}, channels: {channels}')
     axes.legend(loc='upper left')
     return fig, axes
-
 
 #
 # Transform wireless files to concatenated binary, single electrode, files
@@ -331,6 +332,9 @@ BLOCKSIGNATURE = [
     0x1, 0x0,                       # Format version.
     0x0, 0x1                        # Size of block (64KB)
 ]
+NEURONTYPE = 2
+MOTIONTYPE = 3
+
 # Find runs of ones. See
 # https://newbedev.com/find-length-of-sequences-of-identical-values-in-a-numpy-array-run-length-encoding
 #
@@ -362,16 +366,15 @@ start, finish, length - Start, finish and length of runs of 1-s in bits array.
 #
 # Transform wireless data to neural data
 #
-def wirelessToChannels (base, files, outdir=None, prefix='NEUR',
-                        verbose=False, tolerance=2, blocktolerance=3,
-                        nchannels=DATANCHANNELS, freq=DATAFREQ):
+def wirelessToChannels (base, files, prefix='NEUR',
+                        verbose=False, nchannels=DATANCHANNELS, freq=DATAFREQ):
     logging.info("started wirelessToMotion function")
-    sensors = ['acc', 'gyr', 'mag']
-    axes = ['x', 'y', 'z']
-    files = (f if type (f) is str else f'{prefix}{f:04d}.DT2'
-             for f in files)
-    if not base is None:
-        files = (os.path.join (base, datafile) for datafile in files)
+#    sensors = ['acc', 'gyr', 'mag']
+#    axes = ['x', 'y', 'z']
+#    files = (f if type (f) is str else f'{prefix}{f:04d}.DF1'
+#             for f in files)
+#    if not base is None:
+#        files = (os.path.join (base, datafile) for datafile in files)
 
     channeldata = []
     btimestamps = []
@@ -383,6 +386,9 @@ def wirelessToChannels (base, files, outdir=None, prefix='NEUR',
         data = np.fromfile(fd, dtype=np.uint16)
         fd.close()
 
+        #
+        # Generic Stage
+        #
         # Data files should be fixed length.
         if len (data)*2 != DATAFILELEN:
             raise Exception (f'File {datafile} size is {len (data)*2}!')
@@ -406,7 +412,7 @@ def wirelessToChannels (base, files, outdir=None, prefix='NEUR',
         if np.any (np.unique (ind0, return_counts=True) [1] > 1):
             raise f'Non unique neuronal data partition in {datafile}'
 
-        # Extract the neuronal data.
+        # Extract the data.
         ilast, plast = ind0 [-1], ind1 [-1]
         t0, tn = timestamps [ind0 [0]], timestamps [ilast]
         if len (btimestamps) > 0 and btimestamps [-1] [1] != t0:
@@ -418,18 +424,21 @@ def wirelessToChannels (base, files, outdir=None, prefix='NEUR',
             if diff > 0:
                 # Pad with zeros
                 channeldata.append (np.zeros (
-                    (int (diff * DATAFREQ // 1000), nchannels)
+                    (int (diff * freq // 1000), nchannels)
                 ))
             else:
                 # Truncate previous data.
                 index = len (channeldata)-1
                 while diff > 0 and index >= 0:
-                    trunc = int (diff * DATAFREQ // 1000)
+                    trunc = int (diff * freq // 1000)
                     if trunc > len (channeldata [index]):
                         trunc = len (channeldata [index])
                     channeldata [index] = channeldata [index] [:trunc]
                     index -= 1
-        channels = np.zeros ((int ((tn - t0) * DATAFREQ // 1000 +
+        #
+        # Neuronal Data Handling
+        #
+        channels = np.zeros ((int ((tn - t0) * freq // 1000 +
                                    partinfo [ilast, plast, 2] // (2*nchannels)),
                               nchannels), dtype=np.int16)
         prevend = -1
@@ -438,7 +447,7 @@ def wirelessToChannels (base, files, outdir=None, prefix='NEUR',
             # Timestamp is too coarse, but we assume it's precise. It may cause
             # a glitch once in a while, but it seems the data is synchronised to
             # the timestamp.
-            cs = (ti-t0) * int(DATAFREQ // 1000)
+            cs = (ti-t0) * int(freq // 1000)
             ce = cs + int (length // (2*nchannels))
 #            print (cs, ce, ce - cs, length // (2*nchannels))
             # print (channels [cs:ce, :].shape)
@@ -448,10 +457,106 @@ def wirelessToChannels (base, files, outdir=None, prefix='NEUR',
                 blocks [i0, int (start // 2):int ((start + length) // 2)]
                 .reshape (-1, nchannels) - 2**15
                 ).astype (np.int16)
-            prevend = ti + (length // (2*nchannels*(DATAFREQ // 1000)))
+            prevend = ti + (length // (2*nchannels*(freq // 1000)))
         channeldata.append (channels)
         btimestamps.append ([t0, prevend])
     return np.concatenate (channeldata), btimestamps
+
+def getDataFiles (inDir, files, prefix=['NEUR'], suffix='DF1', verbose=False):
+    """
+Get the data files from the file list.
+
+Parameters:
+inDir - Directroy where the files reside (None only uses file path in files).
+files - A list of file names or file numbers.
+prefix - List of filename prefix. When files are provided as numbers, the prefix
+         list is used to search for the file in inDir. First matched file is
+         used as the file.
+suffix - Data files suffix. Used to construct filename when files are provided
+         as numbers.
+verbose - Whether to use verbose logging. At this time ignored.
+
+Returns:
+A list of valid data file paths.
+
+Note:
+If a file is not found, a warning is logged, but processing continues.
+    """
+    filepaths = []
+    for f in files:
+        if type (f) is str:
+            pass
+        elif isinstance (f, numbers.Real):
+            alternatives = (os.path.join (inDir, f'{pfx}{f:04d}.{suffix}')
+                            for pfx in prefix)
+            alternatives = (alt for alt in alternatives if os.path.exists (alt))
+            try:
+                f = next (iter (alternatives))
+            except StopIteration as e:
+                logging.warning (f'Missing file {f}')
+                continue
+
+        filepaths.append (f)
+    return filepaths
+#
+# Transform wireless files to concatenated binary, single electrode, files
+#
+def wirelessToBinV2(inDir, outDir, files, elecList,
+                    prefix=['NEUR'], suffix='DF1',
+                    nchannels=DATANCHANNELS, freq=DATAFREQ, verbose=False):
+    """
+Read data files and return the neuronal channels data, optionally save them in
+files. Data is saved as numpy binary data. (X.tofile)
+
+Parameters:
+inDir - Directroy where the files reside (None only uses file path in files).
+outDir - Output files directory. If None, no files are saved.
+files - A list of file names or file numbers.
+eleList - A list of electrodes to save (0-nchannels).
+prefix - List of filename prefix. When files are provided as numbers, the prefix
+         list is used to search for the file in inDir. First matched file is
+         used as the file. Default ['NEUR'].
+suffix - Data files suffix. Used to construct filename when files are provided
+         as numbers. Default 'DF1'.
+nchannels - Number of neuronal channels recorded. Default is DATANCHANNELS (32).
+freq - Sampling frequency. Default is DATAFREQ (32KHz).
+verbose - Whether to log more information.
+
+Returns:
+channels, timestamps
+Channels [nsamples x nchannels] is the neuronal data. All channels are returned.
+Timestamps [nblocks x 2] are the beginning and finish timestamps of each block.
+    """
+    #
+    # Get input file list.
+    #
+    filepaths = getDataFiles (inDir, files, prefix, suffix, verbose)
+
+    channels, timestamps = wirelessToChannels (None, filepaths, verbose=verbose,
+                                               nchannels=nchannels, freq=freq)
+    elecfiles = None
+    if not (outDir is None):
+        safeOutputDir (outDir)
+        #
+        # Find first and last file numbers.
+        #
+        nums = (int (re.sub ('\D', '', os.path.basename (f).split ('.') [0]))
+                for f in filepaths)
+        nums = sorted (nums)
+        file0, filen = nums [0], nums [-1]
+        #
+        # Create electrode files.
+        #
+        elecfilenames = (os.path.join (outDir, f'Elec{e}-F{file0}-{filen}.bin')
+                         for e in elecList)
+        for elec, name in zip (elecList, elecfilenames):
+            channels [:, elec].tofile (open (name, 'wb'))
+            if verbose:
+                logging.info (f'Electrode {elec} dumped to file {name}.')
+
+    return channels, np.linspace (0,
+                                  (timestamps [-1][1] - timestamps [0][0])/1000,
+                                  len (channels))
 #
 # Transform wireless data to motion data
 #
@@ -554,6 +659,375 @@ def wirelessToMotion (base, files, outdir=None, prefix='NEUR',
         cspans     [cbadblocks] = 32 * 16
         motiondata [cbadblocks,
                     DMHEADERSIZE:(DMHEADERSIZE+32*3*3)] = 0
+        cdatawords [cbadblocks] = [32*3, 32*3, 32*3]
+        coffsets [cbadblocks] = (DMHEADERSIZE + 32*3*0,
+                                 DMHEADERSIZE + 32*3*1,
+                                 DMHEADERSIZE + 32*3*2)
+        #
+        # Add data to processes files lists.
+        #
+        timestamps.append (ctimestamps)
+        datawords.append  (cdatawords)
+        offsets.append    (coffsets)
+        spans.append      (cspans)
+        goodblocks.append (cgoodblocks)
+        origdata [0].append (np.concatenate (
+            [motiondata [block, offset:offset+datalen].astype (np.int16)
+             for block, (offset, datalen)
+             in enumerate (zip (coffsets [:,0], cdatawords [:,0]))]
+        ))
+        origdata [1].append (np.concatenate (
+            [motiondata [block, offset:offset+datalen].astype (np.int16)
+             for block, (offset, datalen)
+             in enumerate (zip (coffsets [:,1], cdatawords [:,1]))]
+        ))
+        origdata [2].append (np.concatenate (
+            [motiondata [block, offset:offset+datalen].astype (np.int16)
+             for block, (offset, datalen)
+             in enumerate (zip (coffsets [:,2], cdatawords [:,2]))]
+        ))
+
+        # print ([(block, offset, datalen, motiondata [block].shape)
+        #      for block, (offset, datalen)
+        #      in enumerate (zip (coffsets [0], cdatawords [0]))])
+        prevtimestamp = ctimestamps [-1]
+
+    # Flatten data from all files and remove trailing empty blocks
+    goodblocks = np.concatenate (goodblocks)
+    if not np.any (goodblocks):
+        logging.error (f'No good blocks were found in files.')
+        resampled = np.zeros ((0, 3*3))
+        df = pd.DataFrame (resampled,
+                           columns=pd.MultiIndex
+                           .from_product ([sensors, axes], 
+                                          names=['sensorName', 'sensorNum']))
+        return df
+        
+    # We drop the last block so we have valid timestamps.
+    lastgood = np.where (goodblocks) [0] [-1]
+    goodblocks = goodblocks [:lastgood]
+    origdata = [np.concatenate (data).reshape (-1, 3) for data in origdata]
+    timestamps = np.concatenate (timestamps) [:lastgood+1]
+    timestamps = timestamps / DMSAMPLERATE / DMTSFACTOR
+    datawords  = np.concatenate (datawords) [:lastgood]
+    offsets    = np.concatenate (offsets) [:lastgood]
+    spans      = (np.concatenate (spans) / DMTSFACTOR) [:lastgood].astype (int)
+
+    # Fix last span. As we don't have the next timestamp, we assume 32mSec.
+    spans [-1] = 32
+    # Resample data if necessary. Mismatched is 0 for correct # of samples.
+    resampled = np.zeros ((int (np.sum (spans)), 3*3))
+    mismatched = (spans.reshape (-1, 1) - datawords [:lastgood]/3)
+    intolerable = np.abs (mismatched) > tolerance
+    btimes   = np.concatenate (([0], np.add.accumulate (spans))).astype (int)
+    # logging.info (f'BTimes {btimes}')
+    logging.info (f'Resampling')
+    for datatype in range (2):
+        # Copy non mismatched good blocks
+        logging.info (f'Copying good blocks {datatype}.')
+        boffsets = np.concatenate (([0],
+                   np.add.accumulate (datawords [:, datatype]/3))).astype (int)
+        s, f, n = runs_of_ones_array ((mismatched [:, datatype] == 0) * 1)
+        for bstart, bfinish, nblocks in zip (s, f, n):
+            target0 = btimes [bstart]
+            target1 = btimes [bfinish]
+            source0 = boffsets [bstart]
+            source1 = boffsets [bfinish]
+
+            resampled [target0:target1, datatype*3:(datatype+1)*3] = (
+                origdata [datatype] [source0:source1]
+            )
+        # Fix over tolerance blocks.
+        logging.info (f'Fixing intolerable blocks {datatype}.')
+        for b,e,l in zip (*runs_of_ones_array (intolerable [:, datatype])):
+            # This is a reversed graph with X as the position of samples
+            # (integer values are samples), and Y the timestampes. Since we need
+            # to interpolate on a different timescale we compute the timestamp
+            # of each sampled point within a block by interpolation of Y, and
+            # setting the expected number of samples within the block (instead
+            # of the existing one).
+            # Generate resampled x points in the run
+            x = np.arange (np.sum (datawords [b:e, datatype] / 3))
+            # Compute the location of sampled timestamps
+            xp = np.add.accumulate (
+                np.concatenate (([0], datawords [b:e, datatype] / 3))
+                )
+            # The timestamps at block boundaries
+            yp = timestamps [b:e+1] * DMSAMPLERATE
+            source0 = boffsets [b]
+            source1 = boffsets [e]
+            target0 = btimes [b]
+            target1 = btimes [e]
+            # Use interpolate to locate the sample timestamps within blocks.
+            st = np.interp (x, xp, yp)
+            # Reset start to 0
+            st = (st - st [0])
+            # Resample the run
+            logging.info (f'Resampling run {b}-{e}:{l}')
+            logging.info (f's0 {source0}:s1 {source1}, t0 {target0}:t1 {target1}')
+            for i, ri in zip (range (3), range (datatype*3, datatype*3+3)):
+                resampled [target0:target1, ri] = np.interp (
+                    np.arange (target1 - target0),
+                    st, origdata [datatype] [source0:source1, i])
+
+        # Set fixed blocks as good.
+        # Fix blocks within tolerance where aberration persists.
+        summed = np.add.accumulate (mismatched [:, datatype])
+        # Compute over tolerance blocks
+        state = summed [0]
+        fixedpos = 0
+        dataoff = datatype*3
+        logging.info (f'Fixing long aberration {datatype}.')
+        for i in np.where (summed [:-1] != summed [1:]) [0]:
+            # Have we handled this transition already
+            if i < fixedpos or intolerable [i+1, datatype]:
+#                print (f'Skipping fixed {fixedpos} or intolerable block {i+1}')
+                state = summed [i+1]
+                continue
+
+            # Does this aberration right itself.
+            pos0 = np.where (summed [i+2:i+1+blocktolerance] == state) [0]
+#            print (i+1, pos0)
+            if len (pos0) > 0:
+                # We have a 0 - This block rights itself in the next blocks.
+                pos0 = pos0 [0] + i+2
+#                print (f'Self righting block {i+1} @ {pos0}:  {source0}:{source1} -> {target0}:{target1}/{state}')
+                # Check no intolerable blocks interrupt.
+                if not np.any (intolerable [pos0:i+1+blocktolerance, datatype]):
+                    source0 = boffsets [i+1]
+                    source1 = boffsets [pos0+1]
+                    target0 = btimes [i+1]
+                    target1 = btimes [pos0+1]
+                    resampled [target0:target1, dataoff:dataoff+3] = (
+                        origdata [datatype] [source0:source1]
+                        )
+                    fixedpos = pos0
+                    continue
+
+            # We need to resample the block.
+            #x = np.arange (np.sum (datawords [b:e, datatype] / 3))
+            # Compute the location of sampled timestamps
+            #xp = np.array ([0, datawords [i+1] / 3)
+            # The timestamps at block boundaries
+            #yp = timestamps [i+1:i+3] * DMSAMPLERATE
+            source0 = boffsets [i+1]
+            source1 = boffsets [i+2]
+            target0 = btimes [i+1]
+            target1 = btimes [i+2]
+            # Use interpolate to locate the sample timestamps within blocks.
+            #st = np.interp (x, xp, yp)
+            # Reset start to 0
+            #st = (st - st [0])
+            st = np.linspace (0,
+                              timestamps [i+2]-timestamps [i+1],
+                              source1-source0+1) [:-1] * DMSAMPLERATE
+            # Resample the run
+            for si, ti in zip (range (3), range (datatype*3, datatype*3+3)):
+#                print ('Data')
+#                print (origdata [datatype] [source0:source1, i])
+#                print ('Sample times')
+#                print (st)
+#                print (f'New range: {target1 - target0}')
+                resampled [target0:target1, ti] = np.interp (
+                    np.arange (target1 - target0),
+                    st, origdata [datatype] [source0:source1, si])
+#            print (f'Resampled block {source0}:{source1} -> {target0}:{target1}/{state} {i}{summed [i-5:i+5]}')
+
+            state = summed [i+1]
+            fixedpos = i+1
+
+    # Handle the magnetometer data using resample. Since it's sampled at 111Hz,
+    # we'll resample every 9 blocks taking 7 blocks each time.
+    boffsets = np.concatenate (([0],
+                  np.add.accumulate (datawords [:, 2]/3))).astype (int)
+    logging.info (f'Resampling magnetometer.')
+    for b, e, l in zip (*runs_of_ones_array (goodblocks [:-1])):
+        logging.info (f'Run {b}-{e}:{l}')
+        for si, ti in zip (range (3), range (6, 9)):
+            if l < 9:
+                source0 = boffsets [b]
+                source1 = boffsets [e]
+                target0 = btimes [b]
+                target1 = btimes [e]
+                # For short sequences we have to resample as is
+                resampled [target0:target1, ti] = (
+                    sig.resample (origdata [2] [source0:source1, si],
+                                  target1 - target0)
+                    )
+                continue
+
+            # First block has a boundary issue
+            source0 = boffsets [b]
+            source1 = boffsets [b+9]
+            target0 = btimes [b]
+            target1 = btimes [b+8]
+            target2 = btimes [b+9]
+            resampled [target0:target1, ti] = (
+                sig.resample (origdata [2] [source0:source1, si],
+                              target2 - target0) [:target1 - target0]
+                )
+            # Handle all interim resamples (available
+            data = []
+            # for bi in range (b+8, e-8, 7):
+            #     try:
+            #         data.append (sig.resample (origdata [2] [boffsets [bi]:boffsets [bi+9],
+            #                                         si],
+            #                           btimes [bi+8] - btimes [bi-1])
+            #             [btimes [bi]-btimes [bi-1]:btimes [bi+7] - btimes [bi-1]])
+            #     except Exception as e:
+            #         print (f'Exception @{bi}')
+            #         print (btimes [bi-1], btimes [bi+8])
+            #         print (boffsets [bi], boffsets [bi+9])
+            #         traceback.print_exception (type (ex), ex, ex.__traceback__)
+            data = [sig.resample (origdata [2] [boffsets [bi]:boffsets [bi+9],
+                                                si],
+                                  btimes [bi+8] - btimes [bi-1])
+                    [btimes [bi]-btimes [bi-1]:btimes [bi+7] - btimes [bi-1]]
+                    for bi in range (b+8, e-8, 7)]
+            data = np.concatenate (data)
+            target0 = target1
+            target1 = target0 + len (data)
+            resampled [target0:target1, ti] = data
+            # Handle last resample block
+            nb = b+8 + (e - b-8) // 7 * 7
+            source0 = boffsets [nb - 1]
+            source1 = boffsets [e+1]
+            targetb = btimes [nb-1]
+            target0 = btimes [nb]
+            target1 = btimes [e+1]
+            resampled [target0:target1, ti] = (
+                sig.resample (origdata [2] [source0:source1, si],
+                              target1 - targetb) [target0-targetb:]
+                )
+            
+    df = pd.DataFrame (resampled,
+                       columns=pd.MultiIndex
+                       .from_product ([sensors, axes], 
+                                      names=['sensorName', 'sensorNum']),)
+    return df
+
+#
+# Transform wireless data to motion data
+#
+def wirelessToMotionV2 (base, files, prefix=[ 'NEUR' ], suffix='DF1',
+                        verbose=False, tolerance=2, blocktolerance=3):
+    logging.info("started wirelessToMotion function")
+    sensors = ['acc', 'gyr', 'mag']
+    axes = ['x', 'y', 'z']
+    files = getDataFiles (base, files, prefix, suffix, verbose)
+
+    btimestamps = []   # These are the block timestamps. They're mostly ignored.
+    timestamps = []
+    datawords = []
+    offsets = []
+    spans = []
+    goodblocks = []
+    # Original data for each of the data types.
+    origdata = [[], [], []]
+    prevtimestamp = 0
+
+    for datafile in files:
+        if verbose:
+            print(f'Read raw file {datafile}')
+
+        fd = open(datafile, 'rb')
+        data = np.fromfile(fd, dtype=np.uint16)
+        fd.close()
+
+        #
+        # Generic Stage
+        #
+        # Data files should be fixed length.
+        if len (data)*2 != DATAFILELEN:
+            raise Exception (f'File {datafile} size is {len (data)*2}!')
+
+        # File is composed of 64KB blocks.
+        blocks = data.reshape (-1, BLOCKLEN // 2)
+        # Test blocks signatures.
+        goodblocks = np.all (blocks [:, :len(BLOCKSIGNATURE)] == BLOCKSIGNATURE,
+                             axis=1)
+        # Extract timestamps.
+        #timestamps = np.dot (blocks [:, 8:10], [[1], [2**16]])
+        #timestamps = timestamps.astype (np.uint32).reshape (-1)
+        # Extract data partitions.
+        # Partition info are 3 uint32: Type, Start, Length.
+        nblocks = len (blocks)
+        compmat = (np.diag (np.ones (7*6)) [::2] +
+                   np.diag (np.ones (7*6)) [1::2] * 2**16).T
+        partinfo = np.dot (blocks [:, 12:54], compmat).reshape (nblocks, -1, 3)
+        # Get reference to neuronal data.
+        ind0, ind1 = np.where (partinfo [goodblocks, :, 0] == MOTIONTYPE)
+        if np.any (np.unique (ind0, return_counts=True) [1] > 1):
+            raise f'Non unique neuronal data partition in {datafile}'
+
+        motiondata = []
+        for i0, i1 in zip (ind0, ind1):
+            _, start, length = partinfo [i0, i1]
+            motiondata.append (
+                blocks [i0, int (start // 2):int ((start + length) // 2)]
+                .astype (np.int16)
+            )
+        motionheads = np.array ([d [:16] for d in motiondata])
+        cgoodblocks = (
+            np.all (motionheads [:, :2] == DMSIGNATURE, axis=1) &
+            (motionheads [:, 9] == 0)
+                     )
+
+        cbadblocks = np.nonzero (np.logical_not (cgoodblocks)) [0]
+        if not np.any (cgoodblocks):
+            # No good blocks in file. Add zeros to data.
+            timestamps.append (np.zeros_like (cgoodblocks))
+            datawords.append (np.zeros_like (cgoodblocks))
+            offsets.append (np.zeros_like (cgoodblocks))
+            spans.append (np.ones_like (cgoodblocks)*32)
+            goodblocks.append (cgoodblocks)
+            origdata.append (np.zeros ((1, 9)))
+
+        ctimestamps = np.array (motionheads [:, 10] +
+                                motionheads [:, 11] * 2**16)
+        cdatawords  = motionheads [:, 6:9]
+        coffsets    = motionheads [:, 2:5]
+        cspans      = np.zeros_like (ctimestamps)
+        cspans [:-1] = ctimestamps [1:] - ctimestamps [:-1]
+        # Sanity check on timestamps
+        insaneblocks = (cspans > 2048) | (cspans < 0)
+        cgoodblocks [insaneblocks] = False
+        cbadblocks = np.nonzero (np.logical_not (cgoodblocks)) [0]
+
+        if len (cbadblocks) > 0:
+            start, finish, length = runs_of_ones_array (
+                np.logical_not (cgoodblocks))
+            logging.warning (f'{datafile}: Bad blocks at: ' +
+                             ' '.join ([f'{s}-{f-1} ({l})' for s, f, l in
+                                        zip (start, finish, length)]))
+
+        # logging.info (f'CSpans {cspans}')
+        # logging.info (f'CTimestamps {ctimestamps}')
+        # Fix last block of previous file using first timestamp.
+        if len (spans) > 0:
+            spans [-1] [-1] = ctimestamps [0] - timestamps [-1] [-1]
+        else:
+            # Handle first file. First block is empty.
+            cspans [0] = 0
+        #
+        # Handle badblocks:
+        # Block timespan
+        # --------------
+        # Since we have no indication of the block's timestamp we need to make
+        # assumptions. Since a single block is 1024 words @ 32KHz, each block
+        # spans 32mSec of neuronal data.
+        #
+        # Values
+        # ------
+        # Insert 0 value for the appropriate length. Since the block is bad we
+        # just overwrite the block with zeros and reference them. Although
+        # magnetormeter data is usually sampled at a lower frequency, we're
+        # resampling the data anyhow, so it's not importanct to follow the
+        # sample rate.
+        #
+        cspans     [cbadblocks] = 32 * 16
+        for block in cbadblocks:
+            motiondata [block] [DMHEADERSIZE:(DMHEADERSIZE+32*3*3)] = 0
         cdatawords [cbadblocks] = [32*3, 32*3, 32*3]
         coffsets [cbadblocks] = (DMHEADERSIZE + 32*3*0,
                                  DMHEADERSIZE + 32*3*1,
