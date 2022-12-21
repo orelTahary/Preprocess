@@ -547,7 +547,7 @@ Timestamps [nblocks x 2] are the beginning and finish timestamps of each block.
         #
         # Create electrode files.
         #
-        elecfilenames = (os.path.join (outDir, f'Elec{e}-F{file0}-{filen}.bin')
+        elecfilenames = (os.path.join (outDir, f'Elec{e}-F{file0}T{filen}.bin')
                          for e in elecList)
         for elec, name in zip (elecList, elecfilenames):
             channels [:, elec].tofile (open (name, 'wb'))
@@ -1586,6 +1586,84 @@ def trimoscillations (data, clip=30000, hp=None, lp=None, fs=1000):
         data [columns] = out.T
 
     return data
+
+from glob import glob
+def load_LFP_data(session_folder, foldName = 'binLFPN'):
+    LFP_dict = {}
+    for file in glob(os.path.join(session_folder, foldName, '*.bin') ):
+        elec = file[file.find('Elec')+4:file.find('-F')]
+        # print(elec)
+        with open(file, 'rb') as f:
+            LFP_dict[elec] = np.fromfile(f, 'int16')
+    return LFP_dict
+
+
+def find_threshold_crossings(time_series:np.array, thresh=-2.8, filter=True, area=120):
+    """Find where the time series values cross a threshold
+
+    Args:
+        time_series (np.array): time_series, could be LFP data or rate (for instance)
+        thresh (float, optional): number of standard deviations from the mean as the threshold. Defaults to -2.8.
+
+    Returns:
+        np.array: indices in time series where the threshold was crossed
+    """
+    thresh = thresh*np.std(time_series) + np.mean(time_series)
+    crossings = np.where(np.diff(time_series<thresh )==1)[0]
+    if filter:
+        crossings = filter_close_crossings(crossings, area=area)
+    return crossings
+
+
+def filter_close_crossings(crossings: np.array, area=150):
+    """Remove multiple crossings in the same general area. only keep the first
+
+    Args:
+        crossings (np.array): array of positions in the time series where a threshold was crossed. 
+        area (int): under this number of indices will be counted as close
+
+    Returns:
+        np.array: crossings after being filtered
+    """
+    i=1
+    while i < len(crossings):
+        if crossings[i] - crossings[i-1] < area:
+            crossings = np.delete(crossings, i)
+        else:
+            i +=1
+    return crossings
+
+
+def cut_window(crossings:np.array, time_series:np.array, window=(-50,150)):
+    """Gather waveforms from time series around indices in crossings
+
+    Args:
+        crossings (np.array): indices of threshild crossings in the time series
+        time_series (np.array): time series (LFP or rates for instance)
+        window (tuple, optional): values for a window aroud the index window[1]>window[0]. Defaults to (-50,150).
+
+    Returns:
+        crossings: after checking and removing indices from the edges
+        waveforms: np array of size (len(crossings), window[1]-window[0]) containing waveforms from the time series around indices in crossings
+    """
+    # remove first and/or last crossings if a window around the exceeds the time series:
+    if crossings[0] - window[0] < 0:
+        crossings = np.delete(crossings, 0)
+    if crossings[-1] + window[1] > len(time_series):
+        crossings = crossings[:-1]
+    # create empty array and fill it:
+    waveforms = np.zeros((len(crossings), window[1]-window[0]))
+    for i, cross in enumerate(crossings):
+        waveforms[i,:] = time_series[cross+window[0]:cross+window[1] ]
+    
+    return crossings, waveforms
+
+def find_crossings_correlation(template, time_series, thresh=5):
+    corr_to_spike = np.convolve(time_series, np.flip(template), mode='same')
+    crossings = find_threshold_crossings(corr_to_spike, thresh=thresh, filter=True, area=120)
+    return crossings
+
+
 
 if __name__ == "__main__":
     logging.basicConfig(format='%(asctime)s %(message)s', filename='preprocess log', level=logging.DEBUG)
