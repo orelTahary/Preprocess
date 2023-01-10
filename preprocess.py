@@ -944,8 +944,8 @@ def wirelessToMotionV2 (base, files, prefix=[ 'NEUR' ], suffix='DF1',
         # File is composed of 64KB blocks.
         blocks = data.reshape (-1, BLOCKLEN // 2)
         # Test blocks signatures.
-        goodblocks = np.all (blocks [:, :len(BLOCKSIGNATURE)] == BLOCKSIGNATURE,
-                             axis=1)
+        filegoodblocks = np.all (
+            blocks [:, :len(BLOCKSIGNATURE)] == BLOCKSIGNATURE, axis=1)
         # Extract timestamps.
         #timestamps = np.dot (blocks [:, 8:10], [[1], [2**16]])
         #timestamps = timestamps.astype (np.uint32).reshape (-1)
@@ -956,7 +956,7 @@ def wirelessToMotionV2 (base, files, prefix=[ 'NEUR' ], suffix='DF1',
                    np.diag (np.ones (7*6)) [1::2] * 2**16).T
         partinfo = np.dot (blocks [:, 12:54], compmat).reshape (nblocks, -1, 3)
         # Get reference to neuronal data.
-        ind0, ind1 = np.where (partinfo [goodblocks, :, 0] == MOTIONTYPE)
+        ind0, ind1 = np.where (partinfo [filegoodblocks, :, 0] == MOTIONTYPE)
         if np.any (np.unique (ind0, return_counts=True) [1] > 1):
             raise f'Non unique neuronal data partition in {datafile}'
 
@@ -965,13 +965,13 @@ def wirelessToMotionV2 (base, files, prefix=[ 'NEUR' ], suffix='DF1',
             _, start, length = partinfo [i0, i1]
             motiondata.append (
                 blocks [i0, int (start // 2):int ((start + length) // 2)]
-                .astype (np.int16)
             )
         motionheads = np.array ([d [:16] for d in motiondata])
         cgoodblocks = (
             np.all (motionheads [:, :2] == DMSIGNATURE, axis=1) &
             (motionheads [:, 9] == 0)
                      )
+#        print (f'{datafile}: Blocks shape {blocks.shape} Good {cgoodblocks}')
 
         cbadblocks = np.nonzero (np.logical_not (cgoodblocks)) [0]
         if not np.any (cgoodblocks):
@@ -985,6 +985,8 @@ def wirelessToMotionV2 (base, files, prefix=[ 'NEUR' ], suffix='DF1',
 
         ctimestamps = np.array (motionheads [:, 10] +
                                 motionheads [:, 11] * 2**16)
+        ctimestamps2 = np.array ((motionheads [:, 10],
+                                  motionheads [:, 11]))
         cdatawords  = motionheads [:, 6:9]
         coffsets    = motionheads [:, 2:5]
         cspans      = np.zeros_like (ctimestamps)
@@ -993,6 +995,14 @@ def wirelessToMotionV2 (base, files, prefix=[ 'NEUR' ], suffix='DF1',
         insaneblocks = (cspans > 2048) | (cspans < 0)
         cgoodblocks [insaneblocks] = False
         cbadblocks = np.nonzero (np.logical_not (cgoodblocks)) [0]
+
+#        print (f'{datafile}: Insane blocks {runs_of_ones_array (insaneblocks) [0]}')
+#        print (f'{datafile}: Good {runs_of_ones_array (cgoodblocks) [0]}')
+#        print (f'{datafile}: Bad {runs_of_ones_array (cbadblocks) [0]}')
+#        print (f'{datafile}: cspans {cspans}')
+#        print (f'{datafile}: timestamps {ctimestamps}')
+#        print (f'{datafile}: timestamps2 {ctimestamps2}')
+#        print (f'{datafile}: words {[cdatawords [i] for i in np.where (insaneblocks) [0]]}')
 
         if len (cbadblocks) > 0:
             start, finish, length = runs_of_ones_array (
@@ -1041,17 +1051,17 @@ def wirelessToMotionV2 (base, files, prefix=[ 'NEUR' ], suffix='DF1',
         spans.append      (cspans)
         goodblocks.append (cgoodblocks)
         origdata [0].append (np.concatenate (
-            [motiondata [block, offset:offset+datalen].astype (np.int16)
+            [motiondata [block] [offset:offset+datalen].astype (np.int16)
              for block, (offset, datalen)
              in enumerate (zip (coffsets [:,0], cdatawords [:,0]))]
         ))
         origdata [1].append (np.concatenate (
-            [motiondata [block, offset:offset+datalen].astype (np.int16)
+            [motiondata [block] [offset:offset+datalen].astype (np.int16)
              for block, (offset, datalen)
              in enumerate (zip (coffsets [:,1], cdatawords [:,1]))]
         ))
         origdata [2].append (np.concatenate (
-            [motiondata [block, offset:offset+datalen].astype (np.int16)
+            [motiondata [block] [offset:offset+datalen].astype (np.int16)
              for block, (offset, datalen)
              in enumerate (zip (coffsets [:,2], cdatawords [:,2]))]
         ))
