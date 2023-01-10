@@ -460,7 +460,7 @@ def wirelessToChannels (base, files, prefix='NEUR',
             prevend = ti + (length // (2*nchannels*(freq // 1000)))
         channeldata.append (channels)
         btimestamps.append ([t0, prevend])
-    return np.concatenate (channeldata), btimestamps
+    return np.concatenate (channeldata).astype(np.int16), btimestamps
 
 def getDataFiles (inDir, files, prefix=['NEUR'], suffix='DF1', verbose=False):
     """
@@ -505,27 +505,27 @@ def wirelessToBinV2(inDir, outDir, files, elecList,
                     prefix=['NEUR'], suffix='DF1',
                     nchannels=DATANCHANNELS, freq=DATAFREQ, verbose=False):
     """
-Read data files and return the neuronal channels data, optionally save them in
-files. Data is saved as numpy binary data. (X.tofile)
+    Read data files and return the neuronal channels data, optionally save them in
+    files. Data is saved as numpy binary data. (X.tofile)
 
-Parameters:
-inDir - Directroy where the files reside (None only uses file path in files).
-outDir - Output files directory. If None, no files are saved.
-files - A list of file names or file numbers.
-eleList - A list of electrodes to save (0-nchannels).
-prefix - List of filename prefix. When files are provided as numbers, the prefix
-         list is used to search for the file in inDir. First matched file is
-         used as the file. Default ['NEUR'].
-suffix - Data files suffix. Used to construct filename when files are provided
-         as numbers. Default 'DF1'.
-nchannels - Number of neuronal channels recorded. Default is DATANCHANNELS (32).
-freq - Sampling frequency. Default is DATAFREQ (32KHz).
-verbose - Whether to log more information.
+    Parameters:
+    inDir - Directroy where the files reside (None only uses file path in files).
+    outDir - Output files directory. If None, no files are saved.
+    files - A list of file names or file numbers.
+    eleList - A list of electrodes to save (0-nchannels).
+    prefix - List of filename prefix. When files are provided as numbers, the prefix
+            list is used to search for the file in inDir. First matched file is
+            used as the file. Default ['NEUR'].
+    suffix - Data files suffix. Used to construct filename when files are provided
+            as numbers. Default 'DF1'.
+    nchannels - Number of neuronal channels recorded. Default is DATANCHANNELS (32).
+    freq - Sampling frequency. Default is DATAFREQ (32KHz).
+    verbose - Whether to log more information.
 
-Returns:
-channels, timestamps
-Channels [nsamples x nchannels] is the neuronal data. All channels are returned.
-Timestamps [nblocks x 2] are the beginning and finish timestamps of each block.
+    Returns:
+    channels, timestamps
+    Channels [nsamples x nchannels] is the neuronal data. All channels are returned.
+    Timestamps [nblocks x 2] are the beginning and finish timestamps of each block.
     """
     #
     # Get input file list.
@@ -1449,9 +1449,9 @@ def plot_corr_mat(dataDir, rangeStr, file_list, raw_fold='binNew', filt_fold='bi
     ccr = np.corrcoef(elec_array)
     ccf = np.corrcoef(filt_array)
     if draw_lfp:
-        fig, ax = plt.subplots(figsize=(30, 10), nrows=1, ncols=3, sharex=True)
+        fig, ax = plt.subplots(figsize=(20, 8), nrows=1, ncols=3, sharex=True)
     else:
-        fig, ax = plt.subplots(figsize=(30, 10), nrows=1, ncols=2, sharex=True)
+        fig, ax = plt.subplots(figsize=(20, 8), nrows=1, ncols=2, sharex=True)
 
     cax = ax[0]
     csr = cax.imshow(ccr)
@@ -1484,15 +1484,14 @@ def plot_corr_mat(dataDir, rangeStr, file_list, raw_fold='binNew', filt_fold='bi
 
 
 def plot_channels(dataDir, fileList, elecList, num_seconds_to_plot=5, samplingRate=32000, bs=900000, ylim=[-700, 700],
-                  raw_fold='binNew'):
-    fig, ax = plt.subplots(figsize=(20, len(elecList) * 4), nrows=len(elecList) * 2, ncols=1, sharex=True, sharey=True)
+                  raw_fold='binNew', st=40):
+    fig, ax = plt.subplots(figsize=(15, len(elecList) * 3), nrows=len(elecList) * 2, ncols=1, sharex=True, sharey=True)
     try:
         plt.ylim(ylim)
     except:
         print(f'y axis not limited, possibly wrong input')
-    num_seconds_to_plot = 5
     samplingRate = 32000
-    bs = 900000
+    bs = st*samplingRate
     be = int(bs + samplingRate * num_seconds_to_plot)
     t = np.arange(bs, be, 1) / samplingRate
     bb, ab = sig.butter(4, [300 / (samplingRate / 2), 6000 / (samplingRate / 2)], btype='bandpass')
