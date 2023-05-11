@@ -367,7 +367,8 @@ start, finish, length - Start, finish and length of runs of 1-s in bits array.
 # Transform wireless data to neural data
 #
 def wirelessToChannels (base, files, prefix='NEUR',
-                        verbose=False, nchannels=DATANCHANNELS, freq=DATAFREQ):
+                        verbose=False, nchannels=DATANCHANNELS, 
+                        freq=DATAFREQ, savetype=np.int16):
     logging.info("started wirelessToMotion function")
 #    sensors = ['acc', 'gyr', 'mag']
 #    axes = ['x', 'y', 'z']
@@ -440,7 +441,7 @@ def wirelessToChannels (base, files, prefix='NEUR',
         #
         channels = np.zeros ((int ((tn - t0) * freq // 1000 +
                                    partinfo [ilast, plast, 2] // (2*nchannels)),
-                              nchannels), dtype=np.int16)
+                              nchannels), dtype=savetype)
         prevend = -1
         for i0, i1, ti in zip (ind0, ind1, timestamps [ind0]):
             _, start, length = partinfo [i0, i1]
@@ -456,11 +457,13 @@ def wirelessToChannels (base, files, prefix='NEUR',
             channels [cs:ce, :] = (
                 blocks [i0, int (start // 2):int ((start + length) // 2)]
                 .reshape (-1, nchannels) - 2**15
-                ).astype (np.int16)
+                ).astype (savetype)
             prevend = ti + (length // (2*nchannels*(freq // 1000)))
         channeldata.append (channels)
         btimestamps.append ([t0, prevend])
-    return np.concatenate (channeldata).astype(np.int16), btimestamps
+    for i in range(len(channeldata)):
+        channeldata[i] = channeldata[i].astype(savetype)
+    return np.concatenate (channeldata).astype(savetype), btimestamps
 
 def getDataFiles (inDir, files, prefix=['NEUR'], suffix='DF1', verbose=False):
     """
@@ -503,7 +506,8 @@ If a file is not found, a warning is logged, but processing continues.
 #
 def wirelessToBinV2(inDir, outDir, files, elecList,
                     prefix=['NEUR'], suffix='DF1',
-                    nchannels=DATANCHANNELS, freq=DATAFREQ, verbose=False):
+                    nchannels=DATANCHANNELS, freq=DATAFREQ, 
+                    verbose=False, savetype=np.int16):
     """
     Read data files and return the neuronal channels data, optionally save them in
     files. Data is saved as numpy binary data. (X.tofile)
@@ -533,7 +537,8 @@ def wirelessToBinV2(inDir, outDir, files, elecList,
     filepaths = getDataFiles (inDir, files, prefix, suffix, verbose)
 
     channels, timestamps = wirelessToChannels (None, filepaths, verbose=verbose,
-                                               nchannels=nchannels, freq=freq)
+                                               nchannels=nchannels, freq=freq,
+                                               savetype=savetype)
     elecfiles = None
     if not (outDir is None):
         safeOutputDir (outDir)
@@ -1355,25 +1360,23 @@ def wirelessToMotioncV0(inDir, files, outDir=None, filepfx='NEUR', verbose=False
 
     return df
 
-
 #
 # Transform wireless data to motion data
 #
-def binToLFP(inDir, outDir, filePattern, elecList, freq=[2, 300], notch=False, verbose=False):
+def binToLFP(inDir, outDir, filePattern, elecList, freq=[2, 300], notch=False, verbose=False, savetype=np.int16):
     logging.info("started binToLFP function")
     safeOutputDir(outDir)
-    [bf, af] = sig.butter(4, [f / (1000 / 2) for f in freq], btype='band')
+    [bf, af] = sig.butter(3, [f / (1000 / 2) for f in freq], btype='band')
     for elec in elecList:
         inFileName = filePattern.format(inDir, str(elec))
-        ifid = open(inFileName, 'rb')
-        data = np.fromfile(ifid, dtype=np.int16)
-        ifid.close()
+        with open(inFileName, 'rb') as ifid:
+            data = np.fromfile(ifid, dtype=np.int16)
         sdata = sig.resample(data, num=data.shape[0] // 32)
-        sdata = sig.filtfilt(bf, af, sdata).astype(np.int16)
+        sdata = sig.filtfilt(bf, af, sdata).astype(savetype)
         if notch:
             F0, Q, Fs = 50, 35, 1000
             [bcomb, acomb] = sig.iirnotch(F0, Q, Fs)
-            sdata = sig.filtfilt(bcomb, acomb, sdata).astype(np.int16)
+            sdata = sig.filtfilt(bcomb, acomb, sdata).astype(savetype)
         outFileName = filePattern.format(outDir, str(elec))
         ofid = open(outFileName, 'wb')
         sdata.tofile(ofid)
@@ -1459,9 +1462,9 @@ def plot_corr_mat(dataDir, rangeStr, file_list, raw_fold='binNew', filt_fold='bi
     ccr = np.corrcoef(elec_array)
     ccf = np.corrcoef(filt_array)
     if draw_lfp:
-        fig, ax = plt.subplots(figsize=(20, 8), nrows=1, ncols=3, sharex=True)
+        fig, ax = plt.subplots(figsize=(8, 4), nrows=1, ncols=3, sharex=True)
     else:
-        fig, ax = plt.subplots(figsize=(20, 8), nrows=1, ncols=2, sharex=True)
+        fig, ax = plt.subplots(figsize=(8, 4), nrows=1, ncols=2, sharex=True)
 
     cax = ax[0]
     csr = cax.imshow(ccr)
@@ -1495,7 +1498,7 @@ def plot_corr_mat(dataDir, rangeStr, file_list, raw_fold='binNew', filt_fold='bi
 
 def plot_channels(dataDir, fileList, elecList, num_seconds_to_plot=5, samplingRate=32000, bs=900000, ylim=[-700, 700],
                   raw_fold='binNew', st=40):
-    fig, ax = plt.subplots(figsize=(15, len(elecList) * 3), nrows=len(elecList) * 2, ncols=1, sharex=True, sharey=True)
+    fig, ax = plt.subplots(figsize=(8, len(elecList) * 2), nrows=len(elecList) * 2, ncols=1, sharex=True, sharey=True)
     try:
         plt.ylim(ylim)
     except:
@@ -1514,6 +1517,7 @@ def plot_channels(dataDir, fileList, elecList, num_seconds_to_plot=5, samplingRa
         ax[i * 2].set_title(f'Raw data channel {elc}')
         ax[i * 2 + 1].plot(t, spk_data[bs:be])
         ax[i * 2 + 1].set_title(f'Spiking data channel {elc}')
+    fig.tight_layout()
 
 def trimoscillations (data, clip=30000, hp=None, lp=None, fs=1000):
     """
@@ -1597,13 +1601,13 @@ def trimoscillations (data, clip=30000, hp=None, lp=None, fs=1000):
     return data
 
 from glob import glob
-def load_LFP_data(session_folder, foldName = 'binLFPN'):
+def load_LFP_data(session_folder, foldName = 'binLFPN', loadtype=np.int16):
     LFP_dict = {}
     for file in glob(os.path.join(session_folder, foldName, '*.bin') ):
         elec = file[file.find('Elec')+4:file.find('-F')]
         # print(elec)
         with open(file, 'rb') as f:
-            LFP_dict[elec] = np.fromfile(f, 'int16')
+            LFP_dict[elec] = np.fromfile(f, dtype=loadtype)
     return LFP_dict
 
 
@@ -1656,10 +1660,8 @@ def cut_window(crossings:np.array, time_series:np.array, window=(-50,150)):
         waveforms: np array of size (len(crossings), window[1]-window[0]) containing waveforms from the time series around indices in crossings
     """
     # remove first and/or last crossings if a window around the exceeds the time series:
-    if crossings[0] - window[0] < 0:
-        crossings = np.delete(crossings, 0)
-    if crossings[-1] + window[1] > len(time_series):
-        crossings = crossings[:-1]
+    crossings = crossings[crossings > -window[0]]
+    crossings = crossings[crossings < (len(time_series) - window[1])]
     # create empty array and fill it:
     waveforms = np.zeros((len(crossings), window[1]-window[0]))
     for i, cross in enumerate(crossings):
