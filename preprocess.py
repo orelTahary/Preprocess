@@ -1479,19 +1479,19 @@ def plot_corr_mat(dataDir, rangeStr, file_list, raw_fold='binNew', filt_fold='bi
     csf = cax.imshow(ccf)
     cax.set_title(f'Spike correlation matrix')
     cax.set_xticks(range(0, len(file_list)))
-    cax.set_xticklabels(file_list)
+    cax.set_xticklabels(file_list, fontdict={'fontsize': 6})
     cax.set_yticks(range(0, len(file_list)))
-    cax.set_yticklabels(file_list)
-    fig.colorbar(csf, ax=ax[1])
+    cax.set_yticklabels(file_list, fontdict={'fontsize': 6})
+    # fig.colorbar(csf, ax=ax[1])
     if draw_lfp:
         cax = ax[2]
         csl = cax.imshow(ccl)
         cax.set_title(f'LFP correlation matrix')
         cax.set_xticks(range(0, len(file_list)))
-        cax.set_xticklabels(file_list)
+        cax.set_xticklabels(file_list, fontdict={'fontsize': 6})
         cax.set_yticks(range(0, len(file_list)))
-        cax.set_yticklabels(file_list)
-        fig.colorbar(csl, ax=ax[2])
+        cax.set_yticklabels(file_list, fontdict={'fontsize': 6})
+        # fig.colorbar(csl, ax=ax[2])
 
     return ccr, ccf
 
